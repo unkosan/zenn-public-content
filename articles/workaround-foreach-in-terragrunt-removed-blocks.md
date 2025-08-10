@@ -3,7 +3,7 @@ title: "Terragrunt の generate block を応用して removed block の for_each
 emoji: "😴"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: ["terragrunt", "terraform"]
-published: false
+published: true
 ---
 
 ## 注意
