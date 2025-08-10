@@ -8,20 +8,19 @@ published: false
 
 ## 注意
 この記事は terragrunt の利用を前提としています。
-生の Terraform を利用している方は頑張って shell script を組むか一リソースずつ手で作成してください。
+生の Terraform を利用している方は "removed / moved block の基本" まで確認後、スクリプトを作成するか手で作成する感じになると思います。
 （博識な方いらっしゃればこれに相当する機能教えてくださると助かります）
 
 ## はじめに
-Terragrunt (Terraform) を利用していると、既存リソースの削除を安全に行いたい場面があります。
-筆者が実際に経験した例で言えば、version の更新により破壊的変更が入ったリソースを tfstate からの削除するのに必要となることがありました。
+Terragrunt (Terraform) を利用していると、既存リソースを destroy せず tfstate からのみ削除したい場面があると思います。
+筆者が実際に経験した例で言えば、version の更新により破壊的変更が入ったリソースを一度管理外に置かせて、後に import するという文脈で必要になったことがありました。
 その際に便利なのが `removed` ブロックです。
 
 通常、この要件を達成するには `terragurnt state rm` コマンドを実行すると思いますが、`removed` ブロックを作成することにより terragrunt apply を通した削除が可能になります。
-すなわち、terragrunt apply の CICD さえ構築されていれば、余計なスクリプトを組まず自動的にリソース削除を実施することができます。
+すなわち、terragrunt apply の CI/CD さえ構築されていれば、余計な shell script を組まず自動的にリソース削除を実施することができます。
 
-しかし、`removed` ブロックには大きな制限があります。それは `for_each` や `count` に対応していないことです。
-
-破壊的変更を跨いだマイグレーション等では、`for_each` を含んだリソース定義を全部削除することもあるため、これができないとなると `terragrunt state rm` を含んだスクリプトの作成と実行を CICD 範囲外で行わなければならなくなると思います。商用環境が CD からしかアクセスできない状況だったら尚更面倒くさいですね。
+しかし、`removed` ブロックには大きな制限があります。それは **`for_each` や `count` に対応していない**ことです。
+`terragrunt state rm` を含んだスクリプトの作成と実行を CI/CD 範囲外で行わなければならなくなるため、DevOps が成熟して商用環境が基本的に CI/CD からしかアクセスできない状況だったら割と面倒に感じると思います。
 
 本記事では、この制限を Terragrunt の `generate block` 機能を使って回避し、動的に `removed block` を構築して terragrunt apply で削除する方法を紹介します。
 
@@ -74,7 +73,7 @@ moved {
 }
 ```
 これによりリソース定義のインスタンスの名称が変更されます。
-`before_moved` と `after_moved` の属性値が異なる場合、move と同時に属性も変更されるので、差分がないか plan で念入りに確認することをお願いします。
+`before_moved` と `after_moved` の属性値が異なる場合、move と同時に属性も変更されるので、差分がないか plan で念入りに確認するのをお願いしたいです。
 
 この二つの block を terraform apply することで `for_each` や `count` を削除することを目指します。 terragrunt を利用されていない読者の方は、ここまでの情報を元にご自身で tf ファイルをご記載ください。
 
@@ -85,6 +84,8 @@ https://github.com/hashicorp/terraform/issues/34439
 https://support.hashicorp.com/hc/en-us/articles/34185721057555-Removing-a-Resource-from-the-Terraform-State-Using-the-removed-block
 
 ## Terragrunt の generate block の基本
+
+本記事では上述した `moved`, `removed` block を `generate` ブロックで生成することで `for_each` を実装します。その前に `generate` ブロックに関して軽くおさらいします。
 
 Terragrunt の `generate` ブロックは、`terragrunt.hcl` 実行時に動的にファイルを生成する機能です。
 これは terragrunt 特有の機能であり、`terragrunt.hcl` もしくはそれに include される `.hcl` ファイルに記載することで実行可能です。
@@ -128,7 +129,7 @@ generate "provider" {
 ## Generate block を利用した for_each の代替
 
 今回はこの generate block の中で `for_each` を実装します。
-`aws_instances.examples[".."]` を tfstate から削除したい場合、最終的には以下のようになるはずです。
+`aws_instances.examples["..."]` を tfstate から削除したい場合、最終的には以下のようになるはずです。
 
 move 実行スクリプト
 ```hcl
@@ -167,6 +168,13 @@ generate "removed_resources" {
 }
 ```
 CI/CD を走らせる際は、それぞれの generate block を別の PR の `.hcl` ファイルに作成して順にマージする形になると思います。これで `for_each` が事実上可能になります。お疲れ様でした。
+
+## おわりに
+
+自分の環境下だけか不明ですが、generate block を編集したり消したりすると、`.terragrunt-cache` に編集前ファイルが残ってしまいローカルでうまく作動しないことがあります。
+CI/CD で実行される場合は関係ないですが、望ましくない挙動をしていたら削除してみるのも一つの手ではあるかなと思います。
+
+terraform も terragrunt も積極的に開発が進められている段階（特に terragrunt はプレリリースの状況）なので、今後の発展に期待していきたいですね。
 
 ## 参考文献
 https://github.com/hashicorp/terraform/issues/34439
