@@ -9,20 +9,20 @@ published: false
 ## 注意
 この記事は terragrunt の利用を前提としています。
 生の Terraform を利用している方は "removed / moved block の基本" まで確認後、スクリプトを作成するか手で作成する感じになると思います。
-（博識な方いらっしゃればこれに相当する機能教えてくださると助かります）
 
 ## はじめに
 Terragrunt (Terraform) を利用していると、既存リソースを destroy せず tfstate からのみ削除したい場面があると思います。
 筆者が実際に経験した例で言えば、version の更新により破壊的変更が入ったリソースを一度管理外に置かせて、後に import するという文脈で必要になったことがありました。
 その際に便利なのが `removed` ブロックです。
 
-通常、この要件を達成するには `terragurnt state rm` コマンドを実行すると思いますが、`removed` ブロックを作成することにより terragrunt apply を通した削除が可能になります。
-すなわち、terragrunt apply の CI/CD さえ構築されていれば、余計な shell script を組まず自動的にリソース削除を実施することができます。
+通常、この要件を達成するには `terragurnt state rm` コマンドを実行すると思いますが、`removed` ブロックを作成することにより terragrunt plan/apply を通した削除が可能になります。この方式は以下の利点があります。
+- terragrunt plan を通して dry-run ができるため、安全に移行作業が進められる。
+- terragrunt apply の CI/CD さえ構築されていれば、余計な shell script を組まず自動的にリソース削除を実施することができる。
 
 しかし、`removed` ブロックには大きな制限があります。それは **`for_each` や `count` に対応していない**ことです。
-`terragrunt state rm` を含んだスクリプトの作成と実行を CI/CD 範囲外で行わなければならなくなるため、DevOps が成熟して商用環境が基本的に CI/CD からしかアクセスできない状況だったら割と面倒に感じると思います。
+この際 `terragrunt state rm` を含んだスクリプトの作成と実行を CI/CD の範囲外で行わなければならず、商用環境でスクリプトがうまく動くことを祈ることになり精神衛生上あんまりよろしくないかと思います。
 
-本記事では、この制限を Terragrunt の `generate block` 機能を使って回避し、動的に `removed block` を構築して terragrunt apply で削除する方法を紹介します。
+本記事では、この制限を Terragrunt の `generate block` 機能を使って回避し、動的に `removed block` を構築して terragrunt plan/apply で削除する方法を紹介します。
 
 ## Terraform における removed / moved block の基本
 
@@ -44,7 +44,8 @@ removed {
 通常、リソース定義を tf ファイルから削除すると destroy が走りますが、`removed` ブロックを記載することによって、実際のリソースの削除は行われず tfstate からのリソース定義の削除だけが行われるようになります。
 実際に plan, apply の実行時には、 `... will be destroyed` から `... will not be destroyed` への表示へ変化します。
 
-しかし、`removed` ブロックは `for_each` や `count` 属性を持ちません。それだけではなく以下のような配列の指定も受け付けないため、単純に `for_each` の各アイテムを列挙するという力技もそのままでは通用しません。
+しかし、`removed` ブロックは `for_each` や `count` 属性を持ちません。
+それだけではなく以下のような **key の指定も受け付けない**ため、単純に `for_each` の各アイテムを列挙するという力技もそのままでは通用しません。
 
 ```hcl
 removed {
@@ -73,7 +74,7 @@ moved {
 }
 ```
 これによりリソース定義のインスタンスの名称が変更されます。
-`before_moved` と `after_moved` の属性値が異なる場合、move と同時に属性も変更されるので、差分がないか plan で念入りに確認するのをお願いしたいです。
+`before_moved` と `after_moved` の属性値が異なる場合、move と同時に属性も変更されるので、差分がないか plan を実行して確認してください。
 
 この二つの block を terraform apply することで `for_each` や `count` を削除することを目指します。 terragrunt を利用されていない読者の方は、ここまでの情報を元にご自身で tf ファイルをご記載ください。
 
@@ -91,7 +92,7 @@ Terragrunt の `generate` ブロックは、`terragrunt.hcl` 実行時に動的�
 これは terragrunt 特有の機能であり、`terragrunt.hcl` もしくはそれに include される `.hcl` ファイルに記載することで実行可能です。
 動的に作成されたファイルは terragrunt plan, apply を実行すると作成されて読み込まれます。
 
-例えば、provider 設定をトップ階層の `.hcl` ファイルに `generate` ブロックとして記載し、商用環境、ステージ環境、開発環境の各モジュール単位の `terragrunt.hcl` で include することにより、コードを DRY に保ちながらも環境による変動を動的に適用することができますね。以下のような感じです
+これは色々使い道があります。例えば、provider 設定をトップ階層の `.hcl` ファイルに `generate` ブロックとして記載し、商用環境、ステージ環境、開発環境の各モジュール単位の `terragrunt.hcl` で include することにより、コードを DRY に保ちながらも環境による変動を動的に適用することができます。システムの複雑度でコード変わりますが、ひとまず簡単な具体例は以下のような感じです
 
 **ディレクトリ構成**
 - `infra/`
@@ -126,6 +127,10 @@ generate "provider" {
 ```
 このような構成にすることにより、provider の定義は `root.hcl` に集約されたまま環境差分を適用することができます。
 
+公式ドキュメントは以下です。
+
+https://terragrunt.gruntwork.io/docs/reference/config-blocks-and-attributes/#generate
+
 ## Generate block を利用した for_each の代替
 
 今回はこの generate block の中で `for_each` を実装します。
@@ -137,7 +142,7 @@ generate "moved_resources" {
   path      = "moved_resources"
   if_exists = "overwrite"
   contents  = <<-EOF
-  %{ for elem in local.parameters ~ }
+  %{ for elem in local.parameters ~}
     resource "aws_instances" "examples_${elem}" {
       ...
     }
@@ -145,7 +150,7 @@ generate "moved_resources" {
       from = aws_instances.examples["${elem}"]
       to   = aws_instances.examples_${elem}
     }
-  %{ endfor ~ }
+  %{ endfor ~}
   EOF
 }
 ```
@@ -156,18 +161,20 @@ generate "removed_resources" {
   path      = "removed_resources"
   if_exists = "overwrite"
   contents  = <<-EOF
-  %{ for elem in local.parameters ~ }
+  %{ for elem in local.parameters ~}
     removed {
       from = aws_instances.examples_${elem}
       lifecycle = {
         destroy = false
       }
     }
-  %{ endfor ~ }
+  %{ endfor ~}
   EOF
 }
 ```
-CI/CD を走らせる際は、それぞれの generate block を別の PR の `.hcl` ファイルに作成して順にマージする形になると思います。これで `for_each` が事実上可能になります。お疲れ様でした。
+上のコードは `join("\n", [for elem in local.params : <<-EOF ... EOF])` のような形でも実装できます。`for_each` 関係ないリソースの state rm も同時に行う際はこちらを使うことになるかもしれません。
+
+CI/CD を走らせる際は、それぞれの generate block をそれぞれ別の PR の `.hcl` ファイルに作成して順にマージする形になると思います。これで `for_each` が事実上可能になります。お疲れ様でした。
 
 ## おわりに
 
