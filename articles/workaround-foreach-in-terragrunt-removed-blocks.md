@@ -84,5 +84,89 @@ https://github.com/hashicorp/terraform/issues/34439
 
 https://support.hashicorp.com/hc/en-us/articles/34185721057555-Removing-a-Resource-from-the-Terraform-State-Using-the-removed-block
 
+## Terragrunt の generate block の基本
+
+Terragrunt の `generate` ブロックは、`terragrunt.hcl` 実行時に動的にファイルを生成する機能です。
+これは terragrunt 特有の機能であり、`terragrunt.hcl` もしくはそれに include される `.hcl` ファイルに記載することで実行可能です。
+動的に作成されたファイルは terragrunt plan, apply を実行すると作成されて読み込まれます。
+
+例えば、provider 設定をトップ階層の `.hcl` ファイルに `generate` ブロックとして記載し、商用環境、ステージ環境、開発環境の各モジュール単位の `terragrunt.hcl` で include することにより、コードを DRY に保ちながらも環境による変動を動的に適用することができますね。以下のような感じです
+
+**ディレクトリ構成**
+- `infra/`
+  - `root.hcl`
+  - `dev/`
+    - `terragrunt.hcl`
+  - `stg/`
+    - `terragrunt.hcl`
+  - `prd/`
+    - `terragrunt.hcl`
+
+**`root.hcl`**
+```hcl
+locals {
+  env_regions = {
+    dev = "ap-northeast-1"
+    stg = "ap-northeast-1"
+    prd = "us-east-1"
+  }
+  env = basename(get_terragrunt_dir())
+}
+
+generate "provider" {
+  path      = "provider.tf"
+  if_exists = "overwrite"
+  contents  = <<-EOF
+    provider "aws" {
+      region = "${local.env_regions[local.env]}"
+    }
+  EOF
+}
+```
+このような構成にすることにより、provider の定義は `root.hcl` に集約されたまま環境差分を適用することができます。
+
+## Generate block を利用した for_each の代替
+
+今回はこの generate block の中で `for_each` を実装します。
+`aws_instances.examples[".."]` を tfstate から削除したい場合、最終的には以下のようになるはずです。
+
+move 実行スクリプト
+```hcl
+generate "moved_resources" {
+  path      = "moved_resources"
+  if_exists = "overwrite"
+  contents  = <<-EOF
+  %{ for elem in local.parameters ~ }
+    resource "aws_instances" "examples_${elem}" {
+      ...
+    }
+    moved {
+      from = aws_instances.examples["${elem}"]
+      to   = aws_instances.examples_${elem}
+    }
+  %{ endfor ~ }
+  EOF
+}
+```
+
+state rm 実行スクリプト
+```hcl
+generate "removed_resources" {
+  path      = "removed_resources"
+  if_exists = "overwrite"
+  contents  = <<-EOF
+  %{ for elem in local.parameters ~ }
+    removed {
+      from = aws_instances.examples_${elem}
+      lifecycle = {
+        destroy = false
+      }
+    }
+  %{ endfor ~ }
+  EOF
+}
+```
+CI/CD を走らせる際は、それぞれの generate block を別の PR の `.hcl` ファイルに作成して順にマージする形になると思います。これで `for_each` が事実上可能になります。お疲れ様でした。
+
 ## 参考文献
 https://github.com/hashicorp/terraform/issues/34439
