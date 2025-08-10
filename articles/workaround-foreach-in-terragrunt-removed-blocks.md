@@ -1,6 +1,6 @@
 ---
 title: "Terragrunt の generate block を応用して removed block の for_each を実現する"
-emoji: "📌"
+emoji: "😴"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: ["terragrunt", "terraform"]
 published: false
