@@ -92,4 +92,63 @@ Password 認証前に Pre Authentiation Lambda が起動することを踏まえ
 
 ## 実装
 
-- 正直社内アプリレベルなら userpool の attribute に書き込んでも良い気はするが、コスト面でスケールしないので注意。
+### DynamoDB
+
+失敗カウンタと後述するロック機構を実現するために DB が必要。
+こういうのは強整合性適用した DynamoDB に任せれば良いという SAA のお告げがあったので DynamoDB を選択したが、正直社内アプリレベルなら Cognito User pool の attribute に書き込んでも良い気がする。
+ただコスト面でスケールしないのでユーザ数が大きい場合は注意。
+
+```hcl
+resource "aws_dynamodb" "lockout" {
+    ""
+}
+```
+
+今回のシステムは各パスワード認証試行時に一時的な（数秒から数十秒）ロックアウトが毎回発生するというデメリットがある。
+この一時ロックアウトは Cognito から CloudWatch Logs に送出される際に少々ラグが発生していることに起因しており、カウンタに失敗回数が反映されるまで試行させたくないという背景がある。
+もしこのロック機構がない場合、カウント反映前に試行ができてしまうので n 回の失敗で t 時間ロックアウトしたいという要件を確実に守れなくなる。
+もしこの一時ロックアウトを消したいのであれば Hosted UI を使わないという選択肢になるので、工数と相談して下さいねー。
+
+### Cognito
+
+Cognito user pool は大体こんな感じになる。
+
+```hcl
+resource "aws_cognito_user_pool" "this" {
+    "plan" = "PLUS"
+    "mode" = "AUDIT"
+    lambda {
+        pre_authentication = aws_lambda.authguard.arn
+    }
+}
+```
+
+Plus プランは監査のみモードでログが出ます。フル機能にする必要ないです。
+
+### Lambda (authguard)
+
+ロックアウトを実現する Cognito Pre Authentication の Lambda を書くとしたらこんな感じ。
+
+```javascript
+const test = 0;
+```
+
+terraform 周りはこれだけ設定すれば良いと思います。
+
+```hcl
+test = test
+```
+
+### Lambda (failcount)
+
+失敗カウントを実現する CloudWatch Logs に subscripted した Lambda を書くならこんな感じです。
+
+```javascript
+const test = 0;
+```
+
+terraform 周りはこれだけ設計すれば良いと思います。
+
+```hcl
+test = test
+```
