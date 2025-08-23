@@ -57,20 +57,39 @@ Password 認証だけの話でも大体一緒なので適宜ご自身で補完�
 - 要注意点
   - パスワード成功が連続する時も、一時ロックアウトが発生する。
 
-## 現状確認
+## 実装方法の調査
 
-調査したところ、CloudTrail から成功・失敗の証跡を取得することはできるらしいとのこと、以下を参照。
+Cognito からパスワード認証成功・情報を抜き出してカウントし、Pre Auth でカウンタを読み込んでアクセス遮断する方針で調査を進めていた。
 
 https://dev.classmethod.jp/articles/how-to-check-the-cognito-authentication-log/
 
 https://qiita.com/shinichi_yoshioka2/items/c1af96f83502a92c5998
 
-これを EventBridge と連携して Lambda で dynamodb に書き込みするか？と仮説を立てていたところ `InitiateAuth` はどうやら Hosted UI からの認証イベントでは発行できないことが発覚。この方針は独自 Web UI を構築しカスタムロジックで API を叩く際の話に限られることになった。
+上の記事によると、CloudTrial から成功・失敗の証跡をユーザ ID (`userSub`) を取得することは可能らしいと書かれているため、この証跡を EventBridge と連携して Lambda を紐付け DynamoDB に書き込むことを仮説として当初は考えていた。
 
-- 確認済みの前提情報
-  - Password 認証前に Pre Authentication Lambda が起動
-  - Password 通過・失敗時点で `Password:Success` / `Password:Failure` が発行
-  - MFA 通過・失敗時点で `Mfa:Success` / `Mfa:Failure` が発行
-    - MFA タイムアウトでは `Mfa:Failure` が発行されない
+しかし実装を進めていくうちに、紹介されている `InitiateAuth` はどうやら **Hosted UI からの認証イベントでは発行されない**らしいことが発覚。
+`InitiateAuth` を実施するのは AWS SDK を通じた API 認証であり、Hosted UI ではプログラマティックな認証を適用できないとのこと。
+
+https://docs.aws.amazon.com/ja_jp/cognito/latest/developerguide/authentication.html?utm_source=chatgpt.com
+
+Developer Guides に記載されているイベントを確認しても、成功・失敗時にトリガされるのは `Login_GET` 以外を除いて他になさそうな状況だった。
+`Login_GET` を確認しても `userSub` / `userName` が存在せずユーザが特定できなかったため、有償プランである Advanced Security Function による実装を検討した。
+
+https://docs.aws.amazon.com/ja_jp/cognito/latest/developerguide/logging-using-cloudtrail.html
+
+ASF を利用すると指定した CloudWatch Logs に `USER_AUTH_EVENTS` が吐き出される。
+検討にあたって、ログの生成結果と条件を確認した。
+
+https://docs.aws.amazon.com/ja_jp/cognito/latest/developerguide/exporting-quotas-and-usage.html?utm_source=chatgpt.com
+
+Developer Guides の内容に限界があったので、ログの生成条件を実際に確認すると、大体このような結果になった。
+
+- Password 通過・失敗時点で `$.message.challenges[]` に `Password:Success` / `Password:Failure` が追加されて発行
+- MFA 通過・失敗時点で `Mfa:Success` / `Mfa:Failure` が追加されて発行、失敗したら失敗した回数だけ追加されて発行
+- MFA タイムアウト時は発行されない
+
+Password 認証前に Pre Authentiation Lambda が起動することを踏まえ、結局 Password 通過・失敗時点のログだけ拾ってやればよいことになるので、`$.message.challenges[]`の末尾に `Password:Success` / `Password:Failure` が来たらカウンタを更新すれば良い。`Mfa:*` 系が来た場合は放棄で OK.
+
+## 実装
 
 - 正直社内アプリレベルなら userpool の attribute に書き込んでも良い気はするが、コスト面でスケールしないので注意。
