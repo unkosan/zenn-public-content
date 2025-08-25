@@ -1,8 +1,8 @@
 ---
 title: "Cognito Hosted UI 上でロックアウトをカスタム制御する"
-emoji: "💥"
+emoji: "🔐"
 type: "tech" # tech: 技術記事 / idea: アイデア
-topics: ["AWS", "Cognito"]
+topics: ["AWS", "Cognito", "terraform"]
 published: false
 ---
 
@@ -10,7 +10,7 @@ published: false
 社内向けの小規模アプリケーションを作成する際に、Cognito の Hosted UI を利用して簡易的に認証基盤を構築することは多いはず。
 Hosted UI を利用すれば自前で Cognito の API を叩くカスタムページを作成せずに済むので確かに便利ですよね。
 
-ただ、実際の案件上では企業のパスワードポリシーが存在して、これに準拠するように制御をカスタマイズしなければならないこともあるはず。
+ただ、実際の案件上では企業のパスワードポリシーが存在して、これに準拠するように制御をカスタマイズしなければならないこともある。
 英数字記号混合や桁数、MFA などは Cognito がネイティブに実装しているため簡単に調節可能だが、ロックアウト機構に関しては残念ながら標準で搭載されている機構のパラメータを自由に調節できないようになっている。
 
 以下 AWS developer guide から引用。将来的に変更される可能性があるとは書いてあるが、現状では 15 分以上ロックアウトの要求がある場合は追加実装が必要になる。
@@ -32,7 +32,7 @@ Password 認証だけの話でも大体一緒なので適宜ご自身で補完�
 
 - 必要コスト
   - Cognito Advanced Security Function (ASF) **PLUS**
-  - DynamoDB, CloudWatch Logs の使用料金
+  - DynamoDB, CloudWatch Logs, Lambda の使用料金
 - 実装方針
   - DynamoDB: 失敗回数カウント用の DB. 
     - failCount: 失敗数カウンタ
@@ -84,7 +84,7 @@ https://docs.aws.amazon.com/ja_jp/cognito/latest/developerguide/exporting-quotas
 
 Developer Guides の内容に限界があったので、ログの生成条件を実際に確認すると、大体このような結果になった。
 
-- Password 通過・失敗時点で `$.message.challenges[]` に `Password:Success` / `Password:Failure` が追加されて発行
+- **Password 通過・失敗時点で `$.message.challenges[]` に `Password:Success` / `Password:Failure` が追加されて発行**
 - MFA 通過・失敗時点で `Mfa:Success` / `Mfa:Failure` が追加されて発行、失敗したら失敗した回数だけ追加されて発行
 - MFA タイムアウト時は発行されない
 
@@ -115,7 +115,7 @@ resource "aws_dynamodb" "lockout" {
 
 hasQueue に着目、これを使って認証終了から失敗回数の反映まで一時的なロックアウトを実施します。
 Cognito から CloudWatch Logs に証跡が送出されるまでには数秒から数十秒ラグが発生しており、失敗回数が反映されるまでユーザは毎回ログインを拒否される。
-正直 UX としては微妙だが、このロック機構がないとカウント反映前に試行ができてしまうので、n 回の失敗で t 時間ロックアウトする要件を確実に守れなくなる。
+正直 UX としては微妙だが、**このロック機構がないとカウント反映前に試行ができてしまう**ので、n 回の失敗で t 時間ロックアウトする要件を確実に守れなくなる。
 もしこの一時ロックアウトを消したいのであれば Hosted UI を使わないという選択肢になるので、工数と要相談です。
 
 ### Cognito
@@ -330,10 +330,5 @@ resource "aws_lambda_permission" "invoke_permission_from_cloudwatch" {
 Hosted UI の形を保ったままロックアウトをカスタム制御する機構について述べてきましたが、ネイティブ実装範囲外の制御を入れると結構面倒っすね。
 ロックアウト機構のカスタマイズがネイティブ実装で可能になると嬉しくなる人結構いると思うんですが、あんまり需要がないんでしょうかね？
 
-今回実装しませんでしたが、パスワードの有効期限などの仕組みに関しては CloudTrail で `ChangePassword` 等のイベントを EventBridge 通して Lambda にトリガすれば作れそうな気がします。こっちの方がロック機構考えなくて良い分実装難易度は簡単でしょうね（本当に？誰か記事出してくれ）。
-`expiredAt` のような key を DynamoDB に追加して一緒に管理することになるのかなあ。
-
-<!-- memo
-* 重要なキーワード、文章を太字で強調する。 
-* auto-healing 機能を追加した場合の実装も考える。
--->
+今回実装しませんでしたが、パスワードの有効期限などの仕組みに関しては CloudTrail で `ChangePassword` 等のイベントを EventBridge 通して Lambda にトリガすれば作れそうな気がします。こっちの方がロック機構考えなくて良い分実装難易度は簡単でしょうね（本当に？誰か記事出してください）。
+`expiredAt` のような key を DynamoDB に追加して一緒に管理することになるのかなあ。Cognito よくわからん。
