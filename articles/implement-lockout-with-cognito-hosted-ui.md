@@ -2,8 +2,8 @@
 title: "Cognito Hosted UI 上でロックアウトをカスタム制御する"
 emoji: "🔐"
 type: "tech" # tech: 技術記事 / idea: アイデア
-topics: ["AWS", "Cognito", "terraform"]
-published: false
+topics: ["aws", "cognito", "terraform"]
+published: true
 ---
 
 ## はじめに
