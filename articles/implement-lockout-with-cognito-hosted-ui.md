@@ -116,7 +116,7 @@ resource "aws_dynamodb" "lockout" {
 今回のシステムは各パスワード認証試行時に一時的な（数秒から数十秒）ロックアウトが毎回発生するというデメリットがある。
 この一時ロックアウトは Cognito から CloudWatch Logs に送出される際に少々ラグが発生していることに起因しており、カウンタに失敗回数が反映されるまで試行させたくないという背景がある。
 もしこのロック機構がない場合、カウント反映前に試行ができてしまうので n 回の失敗で t 時間ロックアウトしたいという要件を確実に守れなくなる。
-もしこの一時ロックアウトを消したいのであれば Hosted UI を使わないという選択肢になるので、工数と相談して下さいねー。
+もしこの一時ロックアウトを消したいのであれば Hosted UI を使わないという選択肢になるので、工数と要相談。
 
 ### Cognito
 
@@ -132,18 +132,28 @@ resource "aws_cognito_user_pool" "this" {
     pre_authentication = aws_lambda.authguard.arn
   }
 }
-
-resource "aws_cloudwatch_log_group" "cognito" {...}
+resource "aws_cloudwatch_log_group" "userlog" {...}
+resource "aws_cognito_log_delivery_configuration" "userlog" {
+  user_pool_id = aws_cognito_user_pool.this.id
+  log_configurations {
+    event_source = "userAuthEvents"
+    log_level    = "INFO"
+    cloud_watch_logs_configuration {
+      log_group_arn = aws_cloudwatch_log_group.userlog.arn
+    }
+  }
+}
 ```
 
 Plus プランは監査のみモードでログが出ます。フル機能にする必要ないです。
-
+`aws_cloudwatch_log_group` は AWS provider v6.5.0 以上が必要なかなり新しめの機能なので注意。
 ### Lambda (authguard)
 
 ロックアウトを実現する Cognito Pre Authentication の Lambda を書くとしたらこんな感じ。
 
 ```javascript
 const ddb = new DynamoDBClient({});
+const tableName = "lockout-ddb";
 
 exports.handler = async (event) => {
   const userSub = event?.request?.userAttributes?.sub;
@@ -152,8 +162,6 @@ exports.handler = async (event) => {
   }
 
   try {
-    const tableName = "lockout-ddb";
-
     const res = await ddb.send(
       new GetItemCommand({
         TableName: tableName,
@@ -178,7 +186,7 @@ exports.handler = async (event) => {
       new UpdateItemCommand({
         TableName: tableName,
         Key: { userSub: { S: userSub }},
-        UpdateExpression: "SET hasqQueue = :flag",
+        UpdateExpression: "SET hasQueue = :flag",
         ExpressionAttributeValues: {
           ":flag": { BOOL: true },
         }
@@ -196,23 +204,15 @@ terraform 周りはこれだけ設定すれば良いと思います。
 Lambda のリソースポリシーは Pre-Auth 指定で自動付与されますが、関数を変更した時に付与されないことがあるので明示しておいた方が安全です。
 
 ```hcl
-resource "aws_iam_policy" "authguard" {
-  // 略
-}
-resource "aws_iam_role" "authguard" {
-  // 略
-}
-resource "aws_iam_role_policy_attachment" "authguard" {
-  // 略
-}
-resource "aws_lambda_function" "authguard" {
-  // 略
-}
+resource "aws_iam_policy" "authguard" {...}
+resource "aws_iam_role" "authguard" {...}
+resource "aws_iam_role_policy_attachment" "authguard" {...}
+resource "aws_lambda_function" "authguard" {...}
 resource "aws_lambda_permission" "invoke_permission_from_cognito" {
-  action = "lambda:InvokeFunction"
+  action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.authguard.function_name
-  principal = "cognito-idp.amazonaws.com"
-  source_arn = aws_cognito_user_pool.userpool.arn
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.userpool.arn
 }
 ```
 
@@ -221,6 +221,9 @@ resource "aws_lambda_permission" "invoke_permission_from_cognito" {
 失敗カウントを実現する CloudWatch Logs に subscripted した Lambda を書くならこんな感じです。
 
 ```javascript
+const ddb = new DynamoDBClient({});
+const tableName = "lockout-ddb";
+
 const gunzip = (buf) =>
   new Promise((resolve, reject) =>
   zlib.gunzip(buf, (err, out) => (err ? reject(err) : resolve(out))));
@@ -246,15 +249,14 @@ exports.handler = aysnc (event) => {
       continue;
     }
 
-    const tableName = "lockout-ddb";
-    const Now = Math.floor(Date.now()/1000);
+    const now = Math.floor(Date.now()/1000);
 
     if (isTrialSuccess) {
       await ddb.send(
         new UpdateItemCommand({
           TableName: tableName,
           Key: { userSub: { S: userSub }},
-          UpdateExpression: "SET failedCount = :zero",
+          UpdateExpression: "SET failCount = :zero",
           ExpressionAttributeValues: {
             ":zero": { N: "0" },
           },
@@ -303,30 +305,21 @@ exports.handler = aysnc (event) => {
 terraform 周りはこれだけ設計すれば良いと思います。
 
 ```hcl
-resource "aws_iam_policy" "failcount" {
-  // 略
-}
-resource "aws_iam_role" "failcount" {
-  // 略
-}
-resource "aws_iam_role_policy_attachment" "failcount" {
-  // 略
-}
-resource "aws_lambda_function" "failcount" {
-  // 略
-}
-resoruce "aws_cloudwatch_log_subscription_filter" "signin" {
-  log_group_name = aws_cloudwatch_log_group.cognito.name
+resource "aws_iam_policy" "failcount" {...}
+resource "aws_iam_role" "failcount" {...}
+resource "aws_iam_role_policy_attachment" "failcount" {...}
+resource "aws_lambda_function" "failcount" {...}
+resource "aws_cloudwatch_log_subscription_filter" "signin" {
+  log_group_name  = aws_cloudwatch_log_group.cognito.name
   destination_arn = aws_lambda_function.failcount.arn
-  filter_pattern = "{ ($.eventSource = \"USER_AUTH_EVENTS\") && ($.message.eventType = \"SignIn\") }"
+  filter_pattern  = "{ ($.eventSource = \"USER_AUTH_EVENTS\") && ($.message.eventType = \"SignIn\") }"
 }
 resource "aws_lambda_permission" "invoke_permission_from_cloudwatch" {
-  action = "lambda:InvokeFunction"
+  action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.failcount.function_name
-  principal = "logs.<region>.amazonaws.com"
-  source_arn = "${aws_cloudwatch_log_group.user_activity.arn}:*"
+  principal     = "logs.<region>.amazonaws.com"
+  source_arn    = "${aws_cloudwatch_log_group.userlog.arn}:*"
 }
-
 ```
 
 ### おわりに
