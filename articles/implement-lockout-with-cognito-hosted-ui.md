@@ -55,7 +55,7 @@ Password 認証だけの話でも大体一緒なので適宜ご自身で補完�
   - パスワード成功かつ MFA 成功時、失敗カウントは 0 になりユーザはリソースにアクセスする
     - MFA 失敗後からの成功を含む
 - 要注意点
-  - パスワード成功が連続する時も、一時ロックアウトが発生する。
+  - パスワード成功が連続する時も初回の失敗時も、一時ロックアウトが発生するので UX がよくない。
 
 ## 実装方法の調査
 
@@ -88,14 +88,14 @@ Developer Guides の内容に限界があったので、ログの生成条件を
 - MFA 通過・失敗時点で `Mfa:Success` / `Mfa:Failure` が追加されて発行、失敗したら失敗した回数だけ追加されて発行
 - MFA タイムアウト時は発行されない
 
-Password 認証前に Pre Authentiation Lambda が起動することを踏まえ、結局 Password 通過・失敗時点のログだけ拾ってやればよいことになるので、`$.message.challenges[]`の末尾に `Password:Success` / `Password:Failure` が来たらカウンタを更新すれば良い。`Mfa:*` 系が来た場合は放棄で OK.
+Password 認証前に Pre Authentiation Lambda が起動することを踏まえ、結局 Password 通過・失敗時点のログだけ拾ってやればよいことになるので、`$.message.challenges[]`の末尾に `Password:Success` / `Password:Failure` が来たらカウンタを更新すれば良い、という感じで決着。`Mfa:*` 系が来た場合は放棄で OK.
 
 ## 実装
 
 ### DynamoDB
 
 失敗カウンタと後述するロック機構を実現するために DB が必要。
-こういうのは強整合性適用した DynamoDB に任せれば良いという SAA のお告げがあったので DynamoDB を選択したが、正直社内アプリレベルなら Cognito User pool の attribute に書き込んでも良い気がする。
+今回は DynamoDB を選択したが、正直社内アプリレベルなら Cognito user pool の attribute に書き込んでも良い気がしている。
 ただコスト面でスケールしないのでユーザ数が大きい場合は注意。
 
 ```hcl
@@ -103,20 +103,20 @@ resource "aws_dynamodb" "lockout" {
   name = "lockout-ddb"
   hash_key = "userSub"
   attribute {
-    name = "userSub"
+    name = "userSub" # User ID, UUID で表示される
     type = "S"
   }
   # 他の属性
-  # failCount (number)
-  # hasQueue (boolean)
-  # lockUntil (number)
+  # failCount (number) # 失敗回数
+  # lockUntil (number) # ロックアウト期限
+  # hasQueue (boolean) # カウント処理中フラグ
 }
 ```
 
-今回のシステムは各パスワード認証試行時に一時的な（数秒から数十秒）ロックアウトが毎回発生するというデメリットがある。
-この一時ロックアウトは Cognito から CloudWatch Logs に送出される際に少々ラグが発生していることに起因しており、カウンタに失敗回数が反映されるまで試行させたくないという背景がある。
-もしこのロック機構がない場合、カウント反映前に試行ができてしまうので n 回の失敗で t 時間ロックアウトしたいという要件を確実に守れなくなる。
-もしこの一時ロックアウトを消したいのであれば Hosted UI を使わないという選択肢になるので、工数と要相談。
+hasQueue に着目、これを使って認証終了から失敗回数の反映まで一時的なロックアウトを実施します。
+Cognito から CloudWatch Logs に証跡が送出されるまでには数秒から数十秒ラグが発生しており、失敗回数が反映されるまでユーザは毎回ログインを拒否される。
+正直 UX としては微妙だが、このロック機構がないとカウント反映前に試行ができてしまうので、n 回の失敗で t 時間ロックアウトする要件を確実に守れなくなる。
+もしこの一時ロックアウトを消したいのであれば Hosted UI を使わないという選択肢になるので、工数と要相談です。
 
 ### Cognito
 
@@ -146,7 +146,8 @@ resource "aws_cognito_log_delivery_configuration" "userlog" {
 ```
 
 Plus プランは監査のみモードでログが出ます。フル機能にする必要ないです。
-`aws_cloudwatch_log_group` は AWS provider v6.5.0 以上が必要なかなり新しめの機能なので注意。
+`aws_cloudwatch_log_group` は AWS provider v6.5.0 以上が必要な、かなり新しめの機能なので注意。
+
 ### Lambda (authguard)
 
 ロックアウトを実現する Cognito Pre Authentication の Lambda を書くとしたらこんな感じ。
@@ -174,6 +175,8 @@ exports.handler = async (event) => {
     const hasQueue = Boolean(res.Item?.hasQueue?.Bool);
 
     if (hasQueue) {
+      // ログが出てこなくて hasQueue=true が永続化するのが怖ければ時間経過で
+      // このブロックを無視する auto-healing 機能を記述してもよし
       throw new Error("Failure count is currently being updated");
     }
 
@@ -218,7 +221,7 @@ resource "aws_lambda_permission" "invoke_permission_from_cognito" {
 
 ### Lambda (failcount)
 
-失敗カウントを実現する CloudWatch Logs に subscripted した Lambda を書くならこんな感じです。
+CloudWatch Logs に以下のような Lambda をサブスクさせてログから失敗回数のカウントに繋げます。
 
 ```javascript
 const ddb = new DynamoDBClient({});
@@ -249,7 +252,7 @@ exports.handler = aysnc (event) => {
       continue;
     }
 
-    const now = Math.floor(Date.now()/1000);
+    const now = Math.floor(Date.now() / 1000);
 
     if (isTrialSuccess) {
       await ddb.send(
@@ -303,6 +306,7 @@ exports.handler = aysnc (event) => {
 ```
 
 terraform 周りはこれだけ設計すれば良いと思います。
+SignIn のイベントだけ処理する感じにしています。
 
 ```hcl
 resource "aws_iam_policy" "failcount" {...}
