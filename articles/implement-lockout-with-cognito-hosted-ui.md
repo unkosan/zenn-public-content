@@ -100,7 +100,16 @@ Password 認証前に Pre Authentiation Lambda が起動することを踏まえ
 
 ```hcl
 resource "aws_dynamodb" "lockout" {
-    ""
+  name = "lockout-ddb"
+  hash_key = "userSub"
+  attribute {
+    name = "userSub"
+    type = "S"
+  }
+  # 他の属性
+  # failCount (number)
+  # hasQueue (boolean)
+  # lockUntil (number)
 }
 ```
 
@@ -115,12 +124,16 @@ Cognito user pool は大体こんな感じになる。
 
 ```hcl
 resource "aws_cognito_user_pool" "this" {
-    "plan" = "PLUS"
-    "mode" = "AUDIT"
-    lambda {
-        pre_authentication = aws_lambda.authguard.arn
-    }
+  user_pool_tier = "PLUS"
+  user_pool_add_ons {
+    advanced_security_mode = "AUDIT"
+  }
+  lambda_config {
+    pre_authentication = aws_lambda.authguard.arn
+  }
 }
+
+resource "aws_cloudwatch_log_group" "cognito" {...}
 ```
 
 Plus プランは監査のみモードでログが出ます。フル機能にする必要ないです。
@@ -130,13 +143,77 @@ Plus プランは監査のみモードでログが出ます。フル機能にす
 ロックアウトを実現する Cognito Pre Authentication の Lambda を書くとしたらこんな感じ。
 
 ```javascript
-const test = 0;
+const ddb = new DynamoDBClient({});
+
+exports.handler = async (event) => {
+  const userSub = event?.request?.userAttributes?.sub;
+  if (!userSub) {
+    throw new Error("User ID not found.");
+  }
+
+  try {
+    const tableName = "lockout-ddb";
+
+    const res = await ddb.send(
+      new GetItemCommand({
+        TableName: tableName,
+        Key: { userSub: { S: userSub }},
+        ProjectionExpression: "lockUntil, hasQueue",
+        ConsistentRead: true,
+      })
+    );
+    const lockUntil = Number(res.Item?.lockUntil?.N || 0);
+    const hasQueue = Boolean(res.Item?.hasQueue?.Bool);
+
+    if (hasQueue) {
+      throw new Error("Failure count is currently being updated");
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    if (lockUntil > now) {
+      throw new Error("This account is locked. Try again later.");
+    }
+
+    await ddb.send(
+      new UpdateItemCommand({
+        TableName: tableName,
+        Key: { userSub: { S: userSub }},
+        UpdateExpression: "SET hasqQueue = :flag",
+        ExpressionAttributeValues: {
+          ":flag": { BOOL: true },
+        }
+      })
+    );
+
+    return event;
+  } catch (err) {
+    throw err;
+  }
+}
 ```
 
 terraform 周りはこれだけ設定すれば良いと思います。
+Lambda のリソースポリシーは Pre-Auth 指定で自動付与されますが、関数を変更した時に付与されないことがあるので明示しておいた方が安全です。
 
 ```hcl
-test = test
+resource "aws_iam_policy" "authguard" {
+  // 略
+}
+resource "aws_iam_role" "authguard" {
+  // 略
+}
+resource "aws_iam_role_policy_attachment" "authguard" {
+  // 略
+}
+resource "aws_lambda_function" "authguard" {
+  // 略
+}
+resource "aws_lambda_permission" "invoke_permission_from_cognito" {
+  action = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.authguard.function_name
+  principal = "cognito-idp.amazonaws.com"
+  source_arn = aws_cognito_user_pool.userpool.arn
+}
 ```
 
 ### Lambda (failcount)
@@ -144,13 +221,112 @@ test = test
 失敗カウントを実現する CloudWatch Logs に subscripted した Lambda を書くならこんな感じです。
 
 ```javascript
-const test = 0;
+const gunzip = (buf) =>
+  new Promise((resolve, reject) =>
+  zlib.gunzip(buf, (err, out) => (err ? reject(err) : resolve(out))));
+
+exports.handler = aysnc (event) => {
+  const compressed = Buffer.from(event.awslogs.data, "base64");
+  const decompressed = await gunzip(compressed);
+  const payload = JSON.parse(decoder.decode(decompressed));
+
+  for (const le of payload.logEvents ?? []) {
+    const parsed = JSON.parse(le.message);
+    const msg = parsed?.message ?? {};
+    const userSub = msg.userSub;
+    const lastTrial = msg.challenges.at(-1);
+
+    const isPasswordTrial = [
+      "Password:Success", 
+      "Password:Failure"
+    ].includes(lastTrial);
+    const isTrialSuccess = lastTrial === "Password:Success";
+
+    if (!userSub || !usPasswordTrial) {
+      continue;
+    }
+
+    const tableName = "lockout-ddb";
+    const Now = Math.floor(Date.now()/1000);
+
+    if (isTrialSuccess) {
+      await ddb.send(
+        new UpdateItemCommand({
+          TableName: tableName,
+          Key: { userSub: { S: userSub }},
+          UpdateExpression: "SET failedCount = :zero",
+          ExpressionAttributeValues: {
+            ":zero": { N: "0" },
+          },
+        })
+      );
+    } else {
+      const res = await ddb.send(
+        new UpdateItemCommand({
+          TableName: tableName,
+          Key: { userSub: { S: userSub }},
+          UpdateExpression: "ADD failCount :inc",
+          ExpressionAttributeValues: {
+            ":inc": { N: "1" },
+          },
+          ReturnValues: "UPDATED_NEW",
+        })
+      );
+
+      const failCount = Number(res.Attributes?.failCount?.N || 0);
+      if (failCount >= MAX_LOGIN_ATTEMPTS) {
+        await ddb.send(
+          new UpdateItemCommand({
+            TableName: tableName,
+            Key: { userSub: { S: userSub }},
+            UpdateExpression: "SET lockUntil = :lu"
+            ExpressionAttributeValues: {
+              ":lu": { N: String(now + LOCKOUT_SECONDS) },
+            }
+          })
+        );
+      }
+    }
+
+    await ddb.send(
+      new UpdateItemCommand({
+        TableName: tableName,
+        Key: { userSub: { S: userSub }},
+        UpdateExpression: "SET hasQueue = :flag",
+        ExpressionAttributeValues: { ":flag": { BOOL: false }}
+      })
+    );
+  }
+}
 ```
 
 terraform 周りはこれだけ設計すれば良いと思います。
 
 ```hcl
-test = test
+resource "aws_iam_policy" "failcount" {
+  // 略
+}
+resource "aws_iam_role" "failcount" {
+  // 略
+}
+resource "aws_iam_role_policy_attachment" "failcount" {
+  // 略
+}
+resource "aws_lambda_function" "failcount" {
+  // 略
+}
+resoruce "aws_cloudwatch_log_subscription_filter" "signin" {
+  log_group_name = aws_cloudwatch_log_group.cognito.name
+  destination_arn = aws_lambda_function.failcount.arn
+  filter_pattern = "{ ($.eventSource = \"USER_AUTH_EVENTS\") && ($.message.eventType = \"SignIn\") }"
+}
+resource "aws_lambda_permission" "invoke_permission_from_cloudwatch" {
+  action = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.failcount.function_name
+  principal = "logs.<region>.amazonaws.com"
+  source_arn = "${aws_cloudwatch_log_group.user_activity.arn}:*"
+}
+
 ```
 
 ### おわりに
