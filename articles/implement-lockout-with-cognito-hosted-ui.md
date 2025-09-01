@@ -70,7 +70,7 @@ https://qiita.com/shinichi_yoshioka2/items/c1af96f83502a92c5998
 しかし実装を進めていくうちに、紹介されている `InitiateAuth` はどうやら **Hosted UI からの認証イベントでは発行されない**らしいことが発覚。
 `InitiateAuth` を実施するのは AWS SDK を通じた API 認証であり、Hosted UI ではプログラマティックな認証を適用できないとのこと。
 
-https://docs.aws.amazon.com/ja_jp/cognito/latest/developerguide/authentication.html?utm_source=chatgpt.com
+https://docs.aws.amazon.com/ja_jp/cognito/latest/developerguide/authentication.html
 
 Developer Guides に記載されているイベントを確認しても、成功・失敗時にトリガされるのは `Login_GET` 以外を除いて他になさそうな状況だった。
 `Login_GET` を確認しても `userSub` / `userName` が存在せずユーザが特定できなかったため、有償プランである Advanced Security Function による実装を検討した。
@@ -80,7 +80,7 @@ https://docs.aws.amazon.com/ja_jp/cognito/latest/developerguide/logging-using-cl
 ASF を利用すると指定した CloudWatch Logs に `USER_AUTH_EVENTS` が吐き出される。
 検討にあたって、ログの生成結果と条件を確認した。
 
-https://docs.aws.amazon.com/ja_jp/cognito/latest/developerguide/exporting-quotas-and-usage.html?utm_source=chatgpt.com
+https://docs.aws.amazon.com/ja_jp/cognito/latest/developerguide/exporting-quotas-and-usage.html
 
 Developer Guides の内容に限界があったので、ログの生成条件を実際に確認すると、大体このような結果になった。
 
@@ -146,7 +146,7 @@ resource "aws_cognito_log_delivery_configuration" "userlog" {
 ```
 
 Plus プランは監査のみモードでログが出ます。フル機能にする必要ないです。
-`aws_cloudwatch_log_group` は AWS provider v6.5.0 以上が必要な、かなり新しめの機能なので注意。
+`aws_cognito_log_delivery_configuration` は AWS provider v6.5.0 以上が必要な、かなり新しめの機能なので注意。
 
 ### Lambda (authguard)
 
