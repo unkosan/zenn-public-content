@@ -172,7 +172,7 @@ generate "removed_resources" {
   EOF
 }
 ```
-上のコードは `join("\n", [for elem in local.params : <<-EOF ... EOF])` のような形でも実装できます。`for_each` 関係ないリソースの state rm も同時に行う際はこちらを使うことになるかもしれません。
+上のコードは `join("\n", [for elem in local.params : <<-EOF ... EOF])` のような形でも実装できます。
 
 CI/CD を走らせる際は、それぞれの generate block をそれぞれ別の PR の `.hcl` ファイルに作成して順にマージする形になると思います。これで `for_each` が事実上可能になります。お疲れ様でした。
 
