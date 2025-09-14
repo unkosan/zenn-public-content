@@ -195,28 +195,6 @@ module 構成は以下の通り、一つずつ解説していきます。
     - output.tf
     - variables.tf
 
-### artifacts.tf
-
-`artifacts.tf`
-
-```hcl
-resource "alicloud_oss_bucket" "artifacts" {
-  bucket = "linebot-oss-bucket-fc-artifacts"
-}
-
-resource "alicloud_oss_bucket_object" "zipfile" {
-  bucket = alicloud_oss_bucket.artifacts.bucket
-  key    = "linebot-oss-object-fc-artifacts-${substr(data.archive_file.zip.output_sha, 0, 12)}.zip"
-  source = data.archive_file.zip.output_path
-}
-
-data "archive_file" "zip" {
-  type        = "zip"
-  source_dir  = "${var.root_path}/services/bot"
-  output_path = "${path.module}/code.zip"
-}
-```
-
 ### fc.tf
 
 `fc.tf`
@@ -262,6 +240,42 @@ resource "alicloud_fcv3_trigger" "http" {
 }
 ```
 
+Function Compute 本体を定義しています。
+FC には複数の世代がありますが、今回は最新世代の V3 を利用しています。
+Compute Instance は CPU, Memory, Disk を数値として定義する仕組みで、runtime は node.js, Java, Python, PHP, Go, .NET を組み込みで装備しているとのこと。今回は node.js を利用して実装するが、現在 AWS で利用できる Node 24.x は Alicloud では未対応とのこと、最新 ver を使いたい方はカスタムランタイムを作成することになると思います。
+
+AWS Lambda 同様、ソースコードと依存ライブラリは zip ファイルにまとめてアップロードする。
+今回は OSS 上の zip を参照するが、`code.lambda_zip` 属性でローカルの zip ファイルを上げることも可能。
+
+LINE Messaging API は http エンドポイントを通して情報を授受するので、Web API を通じて FC が発火されるように設定した。Web API 以外にも EventBridge (Alicloud) や時間指定も可能とのこと。
+Amazon API gateway よりも、AWS Lambda Function URLs の方が近い。
+
+### artifacts.tf
+
+`artifacts.tf`
+
+```hcl
+resource "alicloud_oss_bucket" "artifacts" {
+  bucket = "linebot-oss-bucket-fc-artifacts"
+}
+
+resource "alicloud_oss_bucket_object" "zipfile" {
+  bucket = alicloud_oss_bucket.artifacts.bucket
+  key    = "linebot-oss-object-fc-artifacts-${substr(data.archive_file.zip.output_sha, 0, 12)}.zip"
+  source = data.archive_file.zip.output_path
+}
+
+data "archive_file" "zip" {
+  type        = "zip"
+  source_dir  = "${var.root_path}/services/bot"
+  output_path = "${path.module}/code.zip"
+}
+```
+
+FC で利用するコードと依存ライブラリをまとめた zip ファイルの処理を行っている。
+小さいファイルはローカルからアップロードすることが可能だが、xx KB を超える zip ファイルに関しては OSS に一度あげてから FC で参照する形式を取ることが要求される。依存ライブラリの `openai` が大きかったため、OSS 経由のアップロードで実装した。
+今回は `hashicorp/archive` で提供されている zip ユーティリティを利用して圧縮ファイルを作成したが、プロジェクト制約等で追加できない場合は null_resource 等で代替したり手で作成することも可能。ただし、プラットフォームに依りそう。
+
 ### ram.tf
 
 `ram.tf`
@@ -286,6 +300,10 @@ resource "alicloud_ram_role_policy_attachment" "fc_log_role_attach" {
   policy_name = "AliyunLogFullAccess"
 }
 ```
+
+FC の権限を定義している。
+AWS と同様、ポリシーを作成してロールにアタッチし、先の FC 定義でロールを Assume Role する。
+今回は時間の都合上マネージドポリシーを利用したが、実務上ではポリシーも細かく定義することになるだろう。
 
 ### logs.tf
 
@@ -312,6 +330,10 @@ resource "alicloud_log_store_index" "fc_logs_index" {
   }
 }
 ```
+
+FC のデバッグ、ログ出力のためログストリームを構築する。
+AWS の CloudWatch Logs とは異なり、Alibaba Cloud では Log Project と Log Store の 2 階層を指定してログが出力される。
+ただし、これらだけの指定だと Web UI 上でログが表示されないため、Log Store Index も指定してログの有効化もする必要がある。
 
 ### 他
 
@@ -369,6 +391,8 @@ async function replyMessage(replyToken, text) {
 }
 ```
 
+LINE での message の投稿は reply エンドポイントに JSON を POST すれば良い。
+
 `isMentionToBot.js`
 
 ```javascript
@@ -385,6 +409,9 @@ async function isMentionToBot(ev) {
   return false;
 }
 ```
+
+isSelf 属性という便利な属性があるので、bot 自身がメンションされたことを確認可能。
+グループチャットで使用する際に利用する。
 
 `verifySignature.js`
 
@@ -404,6 +431,8 @@ function verifyLineSignature(bodyStr, headers) {
   return signature === expected;
 }
 ```
+
+API は外部に露出しているので、シークレットで署名検証を行い不審な POST の処理を回避する。
 
 ### llm
 
@@ -437,6 +466,9 @@ async function chatQwenTurbo(userText) {
 }
 ```
 
+Qwen の API は OpenAI のライブラリから呼び出すことができる。
+Streaming を false にした時、思考モードが使えないので `enable_thinking: false` にすることを忘れない。
+
 ### bot
 
 `process.js`
@@ -465,6 +497,8 @@ async function process(ev) {
   await replyMessage(replyToken, reply);
 }
 ```
+
+あとは今までのロジックをまとめるだけ。
 
 ### エントリポイント
 
