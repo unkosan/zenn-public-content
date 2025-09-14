@@ -12,19 +12,19 @@ published: false
 
 ## はじめに
 
-こんにちは、今回は世界第四位の市場シェアにも関わらず、業務上では殆どお目にかかれないクラウド、Alibaba Cloud で遊びたくなったので LINE 上で Qwen を使ったチャットボットを作成してみました。
+こんにちは、今回は AWS, Azure, GCP の次に名前が上がるにも関わらず、業務上では殆どお目にかかれないクラウド、Alibaba Cloud で遊びたくなったので LINE 上で Qwen を使ったチャットボットを作成してみました。
 
 コンプライアンス等の要請から会社の業務用ツールとは完全に別個にしたいのと、友人間の流れみたいなところもあったのでプライベートでアカウントを取得して、LINE でボットを作ってみることにしました。
 
-地政学的な問題から避けられがちな Alibaba Cloud ですが、実は世界 21 ヶ国、63 箇所のアベイラビリティゾーンを展開しており、中国・ASEAN とのビジネスを行う上では選択肢の第一候補として挙がってくるものだと認識しています。
-喫緊で必要になるものではないですが、将来性も踏まえて手をつけておきたいと思ったりしていますね。
+地政学的な問題から避けられがちな Alibaba Cloud ですが、実は世界 20+ リージョン・60 以上のアベイラビリティゾーンを展開しており、中国・ASEAN とのビジネスを行う上では選択肢の第一候補として挙がってくるものだと認識しています。
+喫緊に必要なわけではありませんが、将来性を見据えて学習を兼ねて触ってみました。
 
-筆者が主に AWS を使っている関係上、AWS との比較が出てくると思います。鬱陶しく感じる方もいらっしゃるとは思いますが、ご了承願います。
+筆者は普段 AWS を利用しているため、所々で AWS との比較が出てきますがご容赦ください。
 
 ## LINE Messaging API を用意する
 
 LINE bot は LINE Messaging API を利用して設定します。
-Messaging API を利用することで個人チャットや所属しているグループチャットの情報を Web API 経由で受信したりメッセージを送信したりすることができます。
+Messaging API により、Bot 宛てに送られたメッセージやイベントを Webhook 経由で受信し、返信やプッシュ送信することが可能です。
 詳しくは以下の記事を参考にしてください。
 
 https://zenn.dev/kou_pg_0131/articles/line-push-text-message
@@ -37,53 +37,41 @@ Bot 名は「わんわんお」にしました。
 
 ## Alibaba Cloud のアカウントを用意する
 
-[Alibaba Cloud](https://www.alibabacloud.com/ja?_p_lc=1) にアクセスします。右上のログインをクリックした後に登録リンクを踏んでサインアップを始めます。
-画面の指示に従って住所やクレカ情報を埋めていき、サインアップを完了します。基本的にウィザードに従えばいいので詳しくは説明しません。
+[Alibaba Cloud](https://www.alibabacloud.com/ja?_p_lc=1) にアクセスし、右上の「ログイン」からサインアップします。住所やクレカ情報を入力してアカウントを作成します。
 
 Alibaba Cloud に登録すると各種リソースの無料枠が付与されます。
 今回は積極的に利用しないですが、今後インスタンスを立てたり検証する際に使ってみようと思います。
 
-また、Alibaba Cloud では一部サービスは購入手続きを踏まないと利用できないようです。例えば terraform で有効化を行わないままリソースを apply しようとすると以下のようなエラーが発生します。Web UI で必ず有効化手続きを行いましょう。
+また、Alibaba Cloud では一部サービスは初回に有効化手続きが必要です。例えば Terraform からリソースを作成する際、有効化していないと以下のようなエラーが出ることがあります。
 
 ```
-* Failed to execute "terraform apply" in ./.terragrunt-cache/32vclavby77fAy-C9VVfRTiUmRA/dP5CvTElUG-Yrd5DSd1xIqgSbAM
-  ╷
-  │ Error: [ERROR] terraform-provider-alicloud/alicloud/resource_alicloud_log_project.go:114: Resource alicloud_log_project / Failed!!! [SDK alibaba-cloud-sdk-go ERROR]:
-  │ SDKError:
-  │    StatusCode: 401
-  │    Code: InvalidAccessKeyId
-  │    Message: Your SLS service has not been opened.
-  │    Data: {"httpCode":401,"requestId":"68BF6BB66B4839897F388201","statusCode":401}
-  │ 
-  │ 
-  │   with alicloud_log_project.fc,
-  │   on ram.tf line 1, in resource "alicloud_log_project" "fc":
-  │    1: resource "alicloud_log_project" "fc" {
-  │ 
-  ╵
+SDKError:
+   StatusCode: 401
+   Code: InvalidAccessKeyId
+   Message: Your SLS service has not been opened.
 ```
 
 今回利用するサービスで有効化が必要なのは Simple Log Service (SLS) と Object Simple Storage (OSS) です。
 
-Management Console から OSS を開くと、アクティブ化要求画面が現れます。「今すぐ有効にする」をクリックして画面の指示に従い、購入手続きを行います。
+Management Console から OSS を開くと、有効化要求画面が現れます。「今すぐ有効にする」をクリックして画面の指示に従い、有効化手続きを行います。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/oss-info-activation.png)
 
-SLS に関してもコンソールから開くとアクティブ化の要求画面が現れます。「Log Service のアクティブ化」をクリックして購入手続きを行なってください。
-途中で以下のような謎のモーダルが出現するので、URL をブラウザのアドレスバーにコピペしてアクセス。
+SLS に関してもコンソールから開くと有効化の要求画面が現れます。「Log Service のアクティブ化」をクリックして有効化手続きを行なってください。
+途中で以下のような謎のモーダルが出現することがあります。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/sls-purchase-billing-url.png)
 
-すると次のような検証手続きの画面に映るので、画面の指示に従っていくと購入手続きが完了です。
+URL をブラウザのアドレスバーにコピペしてアクセスすると、次のような検証画面に移るので、画面の指示に従っていくと有効化手続きが完了します。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/sls-purchase-billing-check.png)
 
-最後に、Alibaba 限らず Cloud サービスを個人運用する際にはまず budget を設定しましょう。これは費やしたコストを追跡して予め立てた閾値を超えた場合に指定アドレスに警告メールを送付するシステムです。
+最後に、クラウドを個人で運用する際には **Budget 設定** を行うのが推奨です。閾値を超えた場合に通知を受け取れるので、予期しない課金を防げます。
 請求されてからでは遅いので早めにやっておきましょう。
 
 ## Qwen の有効化
 
-Alibaba Cloud がホストしている LLM, Qwen についても有効化しておきます。
+Qwen（通義千問）は Alibaba Group が開発した大規模言語モデルで、Alibaba Cloud の [**Model Studio**](https://modelstudio.console.alibabacloud.com/) から利用できます。
 
 [Alibaba Cloud Model Studio](https://modelstudio.console.alibabacloud.com/) にアクセスします。ここから Qwen や画像生成モデル Wan などのモデルを管理するダッシュボードを利用することができます。
 Model Studio は中国版と国際版に分かれているため、アクセス後右上に International Edition と記載されていることを確認してください。
