@@ -100,14 +100,14 @@ Model Studio は無償試用制度があり、一定の条件下で各種モデ�
 
 クリックすると利用可能なモデルの一覧が現れるので、その中から使いたいモデルの名前を選んでおきます。
 
-## Terragrunt (Terraform) 用の backend を用意する
+## Terragrunt 用の backend を用意する
 
-Terragrunt で Alibaba Cloud のリソースを操作する際に必要なユーザと tfstate 保存用の bucket の整備を行います。
-CLI のためにルートユーザでアクセストークンを発行するわけにはいかないのと、Alibaba Cloud の調査を兼ねて Web UI での操作を行います。
+Terragrunt で Alibaba Cloud のリソースを操作するためのユーザと tfstate 用の OSS bucket の整備を行います。
+今回は Alibaba Cloud の調査も兼ねているので Web UI でリソースを作成します。
 
-まず、RAM を利用してユーザの作成と権限付与を行います。ユーザ等のエンティティと権限を管理する Alibaba cloud の機能を RAM (Resource Access Management) と呼び、AWS の IAM に相当します。
+ユーザの作成と権限付与は RAM (Resource Access Management) で行います。RAM はユーザ等のエンティティと権限を管理する機能であり、AWS IAM に相当します。
 
-Management Console から RAM を開いてユーザを作成します。ユーザの作成ボタンを押すと以下のような画面が表示されると思います。
+まず、Management Console から RAM を開いてユーザを作成します。ユーザの作成ボタンを押すと以下のような画面が表示されます。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/ram-user-create.png)
 
@@ -115,7 +115,7 @@ Using permanent AccessKey to access を ON にして他のオプションをデ�
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/ram-user-create-credentials.png)
 
-CSV File をダウンロードして控えておきましょう。ここに書いてある AccessKey ID と AccessKey Secret を認証情報として terraform がリソースを作成します。
+CSV File をダウンロードして控えておきましょう。ここに書いてある AccessKey ID と AccessKey Secret を認証情報として terraform を実行します。
 
 ユーザを作成したら、次は権限付与を行います。権限管理タブを開き、Grant Permission ボタンをクリックしてください。
 
@@ -125,21 +125,20 @@ CSV File をダウンロードして控えておきましょう。ここに書�
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/ram-user-grant-detail.png)
 
-AdministratorAccess のトグルを ON にしようとすると警告が出ます。
-今回は試用なので強い権限を与えていますが、RAM を操作しなければ警告通りに PowerUserAccess に変更するべきですし、不必要な機能を操作できないよう最小権限を与えるべきではあります。
+AdministratorAccess のトグルを ON にしようとすると警告が出ますが、RAM を terragrunt で管理することに決めているのでこのままでいきます。RAM を管理しないのであれば警告通り PowerUserAccess に変更すべきですね。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/ram-user-grant-warning.png)
 
-tfstate 保存先の bucket を作成します。
+次に tfstate 保存先の OSS bucket を作成します。
 Management Console から OSS を開き、バケット一覧画面を表示しましょう。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/oss-create-bucket.png)
 
-バケットの作成をクリックします。細かい設定は置いといて、公開アクセス禁止の状態で日本リージョンに作成します。
+バケットの作成をクリックします。細かい設定は置いといて、公開アクセス禁止の状態で東京リージョンに作成します。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/oss-create-bucket-detail-3.png)
 
-次は Terragrunt の設定をしましょう。ローカルのレポジトリを作成し、以下のような構成でファイルツリーを構成します。
+Web UI での準備が完了したので次は Terragrunt の設定です。以下のような構成でファイルツリーを構成します。
 
 - infra
   - live / dev / bot
@@ -150,7 +149,7 @@ Management Console から OSS を開き、バケット一覧画面を表示し�
 - services
   - ...
 
-`root.hcl` の中に provider および backend 設定を記述します。
+`root.hcl` の中に provider および backend 設定を記述します。ここで先ほど設定した OSS bucket と RAM ユーザを利用します。
 
 ```hcl
 remote_state {
@@ -197,24 +196,22 @@ generate "provider" {
 }
 ```
 
-先ほど CSV として控えた Alibaba Cloud のアクセスキーとシークレットキーを `ALIBABA_CLOUD_ACCESS_KEY_ID` および `ALIBABA_CLOUD_ACCESS_KEY_SECRET` 環境変数として Terraform に渡します。
-DRY にするために generate ブロックを使って provider を定義します。中国リージョンにすると現地の法律が色々厄介なため `ap-northeast-1` を指定し、デフォルトを東京リージョンにします。
+先ほど控えた Alibaba Cloud のアクセスキーとシークレットキーを `ALIBABA_CLOUD_ACCESS_KEY_ID` および `ALIBABA_CLOUD_ACCESS_KEY_SECRET` 環境変数として Terragrunt に渡します。
+DRY にするために generate ブロックを使って provider を定義します。東京リージョンをデフォルトにするために `ap-northeast-1` を指定します。
 
-今回はロック用のキーバリューストアは利用しません。
-Alibaba Cloud には DynamoDB に変わる NoSQL DB として Tablestore が存在し、これを Terraform のロック機構に利用することができますが、セキュリティ上の懸念点があります。
+また、ロック用にキーバリューストア OTS (Object Table Store) を利用することもできますが、今回は利用しないことにしました。
+OTS は基本的に http エンドポイントを経由してトランザクションを受け付けますが、ローカルの PC からだと Internet, Internal, VPC endpoint の三種類の内、利用できるのは Internet endpoint のみになります。
+Internet endpoint を安全に利用するためには WAF を導入して IP で弾く機構を実装しないといけませんが、基本的に一人で作業するのでロックの必要性が小さく、プロキシ立ててロック機構を導入するモチベがありませんでした。
+VPC 内で作業したり CI/CD を構築する際はロック用 DB を導入することになるでしょうね。
 
-Tablestore は基本的に https エンドポイントを経由してデータの操作を行います。
-エンドポイントは internet, internal, vpc の三種類ありますが、今回自分が用意した作業環境はローカルの PC で terragrunt を実行する感じなので、URL を知っていれば誰でもアクセスできる internet を選択せざるを得ません。インスタンスを作成して VPC で作業するのは工数と費用の面から避けました。
-Internet endpoint に関しては WAF を導入して IP で弾くこともできますが、基本的に一人で作業するのでロックが必要とされる場面がなく、プロキシ立ててまでロック機構を導入するモチベがありませんでした。
-
-今回 GUI を通じて backend OSS を作成しましたが、実は `terraform-alicloud-modules/remote-backend/alicloud` モジュールを利用することでロック用 tablestore とまとめて構築することができます。今回は management console の調査を兼ねていたので Web UI を利用していましたが、実際に作成する際はこちらも利用すると良いと思います。
+今回 GUI を通じて backend OSS を作成しましたが、実は `terraform-alicloud-modules/remote-backend/alicloud` モジュールを利用することでロック用 OTS とまとめて backend を一発で構築することができます。必要に応じてこちらも利用すると良いと思います。
 
 https://www.alibabacloud.com/help/en/terraform/five-minute-introduction-to-alibaba-cloud-terraform-oss-backend
 
 https://zenn.dev/kaikakin/articles/8e0b1ea308b00a
 
 `terragrunt.hcl` はこんな感じです。`root.hcl` と LINE Messaging API の環境変数をここで読み込ませます。
-また `service/` ディレクトリ配下を参照する際に必要な `root_path` も定義します。`path.module` 等を利用すると terragrunt-cache ディレクトリ内での参照になり `root.hcl` が存在する `infra` 階層以上に自然にアクセスできないので、hcl 内で予めプロジェクトルートへの絶対パスを取得しておきます。
+また `service` ディレクトリ配下を参照する際に必要な `root_path` も定義します。`path.module` 等を利用すると terragrunt-cache ディレクトリ内での参照になり `root.hcl` が存在する `infra` 階層以上に自然にアクセスできないので、hcl 内で予めプロジェクトルートへの絶対パスを取得しておきます。
 
 ```hcl
 include "root" {
@@ -233,7 +230,7 @@ inputs = {
 }
 ```
 
-`terragrunt init` して成功すれば一旦終了です。`modules/bot` 配下については次の項で深掘っていきます。
+`terragrunt init/plan` して成功すれば一旦終了です。`modules/bot` 配下については次の項で深掘っていきます。
 
 ## Terragrunt で Function Compute (FC) のインフラを構築する
 
