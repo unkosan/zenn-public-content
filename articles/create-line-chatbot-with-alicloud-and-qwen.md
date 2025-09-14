@@ -34,6 +34,9 @@ Messaging API を利用することで個人チャットや所属しているグ
 - LINE bot を作成する
 - チャネルを作成し、Messaging API を有効化する
 
+https://zenn.dev/kou_pg_0131/articles/line-push-text-message
+
+https://developers.line.biz/ja/docs/messaging-api/building-bot/
 
 ## Alibaba Cloud のアカウントを用意する
 
@@ -192,7 +195,6 @@ module 構成は以下の通り、一つずつ解説していきます。
     - fc.tf
     - logs.tf
     - ram.tf
-    - output.tf
     - variables.tf
 
 ### fc.tf
@@ -237,6 +239,11 @@ resource "alicloud_fcv3_trigger" "http" {
     methods            = ["POST"]
   })
   function_name = alicloud_fcv3_function.this.function_name
+}
+
+# output.tf に分離しても良い
+output "fc_http_public_url" {
+  value = alicloud_fcv3_trigger.http.http_trigger[0].url_internet
 }
 ```
 
@@ -335,17 +342,22 @@ FC のデバッグ、ログ出力のためログストリームを構築する�
 AWS の CloudWatch Logs とは異なり、Alibaba Cloud では Log Project と Log Store の 2 階層を指定してログが出力される。
 ただし、これらだけの指定だと Web UI 上でログが表示されないため、Log Store Index も指定してログの有効化もする必要がある。
 
-### 他
-
-`output.tf`
-
-```hcl
-output "fc_http_public_url" {
-  value = alicloud_fcv3_trigger.http.http_trigger[0].url_internet
-}
-```
-
 ## Qwen の有効化
+
+[Alibaba Cloud Model Studio](https://modelstudio.console.alibabacloud.com/) から Qwen や Wan などのモデルを管理するダッシュボードにアクセスすることができる。
+Model Studio は中国版と国際版に分かれているため、アクセス後右上に International Edition と記載されているかをチェックすること。
+
+Model Studio は無償試用制度があり、一定の token 数 and 日数までは無料で各種モデルを呼び出すことができる。ログイン後右上近くにある `New User Offer ... Activate Now` をクリックして利用開始、詳しくはドキュメントを参照してほしい。
+
+次に右上の `Get API Key` をクリックして API のシークレットキーを取得する。API 鍵の一覧ページに遷移するので、`Create API Key` ボタンをクリックして Default workspace に鍵を一つ追加する。以下のようにエントリが追加されるので、得られた API Key はコピーして控える。
+
+![](/images/create-line-chatbot-with-alicloud-and-qwen/qwen-dashboard-apikey.png)
+
+そのまま右の Workspaces をクリックしてワークスペースの一覧ページに遷移し Authorization & Throttling Settings を確認する。
+
+![](/images/create-line-chatbot-with-alicloud-and-qwen/qwen-dashboard-workspaces.png)
+
+クリックすると利用可能なモデルの一覧が現れるので、その中から使いたいモデルの名前を控える。
 
 ## Messaging API と Qwen を FC で連携する
 
