@@ -12,46 +12,60 @@ published: false
 
 ## はじめに
 
-今回は Alibaba Cloud を利用して LINE 上で bot を作成する手順についてご紹介します。
-皆様におかれましては、コンプライアンスとセキュリティの観点から基本的に業務上は AWS, Azure, GCP の 3 択から選ぶことになると思います。
-一方で Alibaba Cloud は世界第四位の Cloud Infrastructure にもかかわらず、業務上で使われることは中国市場案件ではない限りなかなかお目にかかる機会はないと思います。
-今回は、Alibaba Cloud を LINE 上で動かす bot を作成して、Alibaba Cloud に対する免疫をつけることを目的としてプロジェクトを始めました。
-なお、会社の業務とは完全に別個にするために、自分で alibaba cloud account を作成して個人用の LINE を利用していることにご注意してください。会社とは全く関係がありません。
-筆者が AWS を利用している関係で、ところどころ AWS サービスとの比較が出てきます。
+こんにちは、今回は世界第四位の市場シェアにも関わらず、業務上では殆どお目にかかれないクラウド、Alibaba Cloud で遊びたくなったので LINE 上で Qwen を使ったチャットボットを作成してみました。
 
-AWS との対応は以下の通りです。覚えましょう。
-- RAM (Resource Access Management) <-> IAM
-- OSS (Object Simple Storage) <-> S3
-- Function Compute <-> Lambda
-- SLS (Simple Log Service) <-> CloudWatch Logs
-- Tablestore <-> DynamoDB
+コンプライアンス等の要請から会社の業務用ツールとは完全に別個にしたいのと、友人間の流れみたいなところもあったのでプライベートでアカウントを取得して、LINE でボットを作ってみることにしました。
+
+地政学的な問題から避けられがちな Alibaba Cloud ですが、実は世界 21 ヶ国、63 箇所のアベイラビリティゾーンを展開しており、中国・ASEAN とのビジネスを行う上では選択肢の第一候補として挙がってくるものだと認識しています。
+喫緊で必要になるものではないですが、将来性も踏まえて手をつけておきたいと思ったりしていますね。
+
+筆者が主に AWS を使っている関係上、AWS との比較が出てくると思います。鬱陶しく感じる方もいらっしゃるとは思いますが、ご了承願います。
 
 ## LINE Messaging API を用意する
 
-LINE で bot を作成する際に利用するのが LINE Messaging API です。
-Messaging API を利用することで個人チャットや所属しているグループチャットの情報を特定の API に POST して処理したり、LINE にメッセージ等を投下したりすることができます。
-本アプリを作成する際には二段階のプロセスを踏むことになると思います。
-- LINE bot を作成する
-- チャネルを作成し、Messaging API を有効化する
+LINE bot は LINE Messaging API を利用して設定します。
+Messaging API を利用することで個人チャットや所属しているグループチャットの情報を Web API 経由で受信したりメッセージを送信したりすることができます。
+詳しくは以下の記事を参考にしてください。
 
 https://zenn.dev/kou_pg_0131/articles/line-push-text-message
 
+公式ドキュメントはこちらです。必要に応じて参照してください。
+
 https://developers.line.biz/ja/docs/messaging-api/building-bot/
+
+Bot 名は「わんわんお」にしました。
 
 ## Alibaba Cloud のアカウントを用意する
 
-[Alibaba Cloud](https://www.alibabacloud.com/ja?_p_lc=1) にアクセスします。右上のログインボタンからログインページに飛び、右下付近にある登録リンクから登録ページに飛びましょう。
-登録ボタンを押すと、メールアドレスとパスワードが要求されます。その後画面の指示に従って住所やクレジットカード情報を埋めていくとサインアップが完了します。こちらの流れに関しては、基本的にウィザードに従えばいいので詳しくは解説しません。
+[Alibaba Cloud](https://www.alibabacloud.com/ja?_p_lc=1) にアクセスします。右上のログインをクリックした後に登録リンクを踏んでサインアップを始めます。
+画面の指示に従って住所やクレカ情報を埋めていき、サインアップを完了します。基本的にウィザードに従えばいいので詳しくは説明しません。
 
-Alibaba Cloud に登録すると各種リソースの無料枠が付いてきます。今回のアプリでは基本的に利用しませんが、今後インスタンスを立てたり検証する際は積極的に使うと良いと思います。
+Alibaba Cloud に登録すると各種リソースの無料枠が付与されます。
+今回は積極的に利用しないですが、今後インスタンスを立てたり検証する際に使ってみようと思います。
 
-Alibaba 限らず Cloud サービスを個人運用する際にはまず budget を設定しましょう。これは費やしたコストを追跡して予め立てた閾値を超えた場合に指定アドレスに警告メールを送付するシステムです。
-請求されてからでは遅いので早めにやっておきましょう。
+また、Alibaba Cloud では一部サービスは購入手続きを踏まないと利用できないようです。例えば terraform で有効化を行わないままリソースを apply しようとすると以下のようなエラーが発生します。Web UI で必ず有効化手続きを行いましょう。
 
-AWS などと違い、Alibaba Cloud ではアカウントを作成したら即時で各種サービスが使えるというわけではありません。一部サービスは即時で使うことができますが、いくつかのサービスは購入手続きが必要です。
-今回利用するサービスで有効化が必要なのは Simple Log Service (SLS) と Object Simple Storage (OSS) です。これらを有効化しない限り terraform 等で CLI から作成することはできません。
+```
+* Failed to execute "terraform apply" in ./.terragrunt-cache/32vclavby77fAy-C9VVfRTiUmRA/dP5CvTElUG-Yrd5DSd1xIqgSbAM
+  ╷
+  │ Error: [ERROR] terraform-provider-alicloud/alicloud/resource_alicloud_log_project.go:114: Resource alicloud_log_project / Failed!!! [SDK alibaba-cloud-sdk-go ERROR]:
+  │ SDKError:
+  │    StatusCode: 401
+  │    Code: InvalidAccessKeyId
+  │    Message: Your SLS service has not been opened.
+  │    Data: {"httpCode":401,"requestId":"68BF6BB66B4839897F388201","statusCode":401}
+  │ 
+  │ 
+  │   with alicloud_log_project.fc,
+  │   on ram.tf line 1, in resource "alicloud_log_project" "fc":
+  │    1: resource "alicloud_log_project" "fc" {
+  │ 
+  ╵
+```
 
-Management Console から OSS を開くと、アクティブ化の注意書きが現れます。「今すぐ有効にする」をクリックして画面の指示に従い、サブスクリプションの手続きを行なってください。
+今回利用するサービスで有効化が必要なのは Simple Log Service (SLS) と Object Simple Storage (OSS) です。
+
+Management Console から OSS を開くと、アクティブ化要求画面が現れます。「今すぐ有効にする」をクリックして画面の指示に従い、購入手続きを行います。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/oss-info-activation.png)
 
@@ -60,9 +74,31 @@ SLS に関してもコンソールから開くとアクティブ化の要求画�
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/sls-purchase-billing-url.png)
 
-すると次のような検証手続きの画面に映るので、画面の指示に従っていくと購入手続きが完了。
+すると次のような検証手続きの画面に映るので、画面の指示に従っていくと購入手続きが完了です。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/sls-purchase-billing-check.png)
+
+最後に、Alibaba 限らず Cloud サービスを個人運用する際にはまず budget を設定しましょう。これは費やしたコストを追跡して予め立てた閾値を超えた場合に指定アドレスに警告メールを送付するシステムです。
+請求されてからでは遅いので早めにやっておきましょう。
+
+## Qwen の有効化
+
+Alibaba Cloud がホストしている LLM, Qwen についても有効化しておきます。
+
+[Alibaba Cloud Model Studio](https://modelstudio.console.alibabacloud.com/) にアクセスします。ここから Qwen や画像生成モデル Wan などのモデルを管理するダッシュボードを利用することができます。
+Model Studio は中国版と国際版に分かれているため、アクセス後右上に International Edition と記載されていることを確認してください。
+
+Model Studio は無償試用制度があり、一定の条件下で各種モデルを無料で呼び出すことが可能です。ログイン後右上にある `New User Offer ... Activate Now` をクリックして利用を開始します。詳しくは[ドキュメント](https://modelstudio.console.alibabacloud.com/?tab=doc#/doc/?type=model&url=2766612)を参照してください。
+
+次に右上の `Get API Key` から Secret Key を取得します。クリックすると Key の一覧ページに遷移するので `Create API Key` から Default workspace に鍵を一つ追加しました。以下のようにエントリが追加されたので、API Key をコピーして控えます。
+
+![](/images/create-line-chatbot-with-alicloud-and-qwen/qwen-dashboard-apikey.png)
+
+そのまま右の Workspaces をクリックしてワークスペースの一覧ページに遷移し Authorization & Throttling Settings を確認。
+
+![](/images/create-line-chatbot-with-alicloud-and-qwen/qwen-dashboard-workspaces.png)
+
+クリックすると利用可能なモデルの一覧が現れるので、その中から使いたいモデルの名前を選んでおきます。
 
 ## Terragrunt (Terraform) 用の backend を用意する
 
@@ -354,23 +390,6 @@ resource "alicloud_log_store_index" "fc_logs_index" {
 FC のデバッグ、ログ出力のためログストリームを構築する。
 AWS の CloudWatch Logs とは異なり、Alibaba Cloud では Log Project と Log Store の 2 階層を指定してログが出力される。
 ただし、これらだけの指定だと Web UI 上でログが表示されないため、Log Store Index も指定してログの有効化もする必要がある。
-
-## Qwen の有効化
-
-[Alibaba Cloud Model Studio](https://modelstudio.console.alibabacloud.com/) から Qwen や Wan などのモデルを管理するダッシュボードにアクセスすることができる。
-Model Studio は中国版と国際版に分かれているため、アクセス後右上に International Edition と記載されているかをチェックすること。
-
-Model Studio は無償試用制度があり、一定の token 数 and 日数までは無料で各種モデルを呼び出すことができる。ログイン後右上近くにある `New User Offer ... Activate Now` をクリックして利用開始、詳しくはドキュメントを参照してほしい。
-
-次に右上の `Get API Key` をクリックして API のシークレットキーを取得する。API 鍵の一覧ページに遷移するので、`Create API Key` ボタンをクリックして Default workspace に鍵を一つ追加する。以下のようにエントリが追加されるので、得られた API Key はコピーして控える。
-
-![](/images/create-line-chatbot-with-alicloud-and-qwen/qwen-dashboard-apikey.png)
-
-そのまま右の Workspaces をクリックしてワークスペースの一覧ページに遷移し Authorization & Throttling Settings を確認する。
-
-![](/images/create-line-chatbot-with-alicloud-and-qwen/qwen-dashboard-workspaces.png)
-
-クリックすると利用可能なモデルの一覧が現れるので、その中から使いたいモデルの名前を控える。
 
 ## Messaging API と Qwen を FC で連携する
 
