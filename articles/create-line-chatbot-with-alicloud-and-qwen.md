@@ -204,9 +204,7 @@ OTS は基本的に http エンドポイントを経由してトランザクシ�
 Internet endpoint を安全に利用するためには WAF を導入して IP で弾く機構を実装しないといけませんが、基本的に一人で作業するのでロックの必要性が小さく、プロキシ立ててロック機構を導入するモチベがありませんでした。
 VPC 内で作業したり CI/CD を構築する際はロック用 DB を導入することになるでしょうね。
 
-今回 GUI を通じて backend OSS を作成しましたが、実は `terraform-alicloud-modules/remote-backend/alicloud` モジュールを利用することでロック用 OTS とまとめて backend を一発で構築することができます。必要に応じてこちらも利用すると良いと思います。
-
-https://www.alibabacloud.com/help/en/terraform/five-minute-introduction-to-alibaba-cloud-terraform-oss-backend
+今回 GUI を通じて backend OSS を作成しましたが、実は `terraform-alicloud-modules/remote-backend/alicloud` モジュールを利用することでロック用 OTS とまとめて backend を一発で構築することができます。[公式ドキュメント](https://www.alibabacloud.com/help/en/terraform/five-minute-introduction-to-alibaba-cloud-terraform-oss-backend)に詳細が記載されていますが、以下の記事も参考になります。
 
 https://zenn.dev/kaikakin/articles/8e0b1ea308b00a
 
@@ -232,20 +230,18 @@ inputs = {
 
 `terragrunt init/plan` して成功すれば一旦終了です。`modules/bot` 配下については次の項で深掘っていきます。
 
-## Terragrunt で Function Compute (FC) のインフラを構築する
+## Terragrunt で FC のインフラを構築
 
-module 構成は以下の通り、一つずつ解説していきます。
+modules の構成は以下の通りです。一つずつ解説していきます。
 
 - infra / modules / bot
-    - artifacts.tf
-    - fc.tf
-    - logs.tf
-    - ram.tf
-    - variables.tf
+  - fc.tf
+  - artifacts.tf
+  - ram.tf
+  - logs.tf
+  - variables.tf
 
-### fc.tf
-
-`fc.tf`
+### fc.tf（Function Compute 本体）
 
 ```hcl
 resource "alicloud_fcv3_function" "this" {
@@ -295,17 +291,15 @@ output "fc_http_public_url" {
 
 Function Compute 本体を定義しています。
 FC には複数の世代がありますが、今回は最新世代の V3 を利用しています。
-Compute Instance は CPU, Memory, Disk を数値として定義する仕組みで、runtime は node.js, Java, Python, PHP, Go, .NET を組み込みで装備しているとのこと。今回は node.js を利用して実装するが、現在 AWS で利用できる Node 24.x は Alicloud では未対応とのこと、最新 ver を使いたい方はカスタムランタイムを作成することになると思います。
 
-AWS Lambda 同様、ソースコードと依存ライブラリは zip ファイルにまとめてアップロードする。
-今回は OSS 上の zip を参照するが、`code.lambda_zip` 属性でローカルの zip ファイルを上げることも可能。
+AWS Lambda 同様、ソースコードと依存ライブラリは zip ファイルにまとめてアップロードします。
+ファイルサイズの都合上、`code.zip_file` でローカルからアップロードするのではなく、OSS 上の zip を参照する方針にしています。
 
-LINE Messaging API は http エンドポイントを通して情報を授受するので、Web API を通じて FC が発火されるように設定した。Web API 以外にも EventBridge (Alicloud) や時間指定も可能とのこと。
-Amazon API gateway よりも、AWS Lambda Function URLs の方が近い。
+FC には、AWS Lambda Function URLs のように API Gateway を省略して直接 Lambda を Web API からトリガさせる機構があります。`alicloud_fcv3_trigger` を定義することで実装しました。生成された URL は output されるように設定しました。
 
-### artifacts.tf
+Web API 以外にも FC は EventBridge (in Alicloud) や時間指定によるトリガが可能らしいです。
 
-`artifacts.tf`
+### artifacts.tf（FC を構成する zip ファイルの生成と更新）
 
 ```hcl
 resource "alicloud_oss_bucket" "artifacts" {
@@ -325,13 +319,13 @@ data "archive_file" "zip" {
 }
 ```
 
-FC で利用するコードと依存ライブラリをまとめた zip ファイルの処理を行っている。
-小さいファイルはローカルからアップロードすることが可能だが、xx KB を超える zip ファイルに関しては OSS に一度あげてから FC で参照する形式を取ることが要求される。依存ライブラリの `openai` が大きかったため、OSS 経由のアップロードで実装した。
-今回は `hashicorp/archive` で提供されている zip ユーティリティを利用して圧縮ファイルを作成したが、プロジェクト制約等で追加できない場合は null_resource 等で代替したり手で作成することも可能。ただし、プラットフォームに依りそう。
+`artifacts.tf` では、FC で利用するコードと依存ライブラリをまとめた zip ファイルの処理を行なっています。
 
-### ram.tf
+小規模なファイルはローカルからアップロードすることが可能ですが、今回のように一定のサイズを超える zip ファイルに関しては OSS を経由して FC で参照する形式を取ることが要求されます。
 
-`ram.tf`
+また、圧縮操作に関しては `hashicorp/archive` の zip ユーティリティを利用しています。プラットフォーム間の一貫性のためにプロバイダを利用していますが、プロジェクトの制約等で追加できない場合は `null_resource` 等でカスタムコマンドを実装したり手で実施することになると思います。
+
+### ram.tf（FC の権限設定）
 
 ```hcl
 resource "alicloud_ram_role" "fc_log_role" {
@@ -354,13 +348,11 @@ resource "alicloud_ram_role_policy_attachment" "fc_log_role_attach" {
 }
 ```
 
-FC の権限を定義している。
-AWS と同様、ポリシーを作成してロールにアタッチし、先の FC 定義でロールを Assume Role する。
-今回は時間の都合上マネージドポリシーを利用したが、実務上ではポリシーも細かく定義することになるだろう。
+`ram.tf` では FC の権限設定を実装しています。
+AWS と同様、ポリシーを作成してロールにアタッチし、Assume Role で権限を付与しています。
+今回は SLS を利用するマネージドポリシーを利用して手抜きしましたが、実務上ではポリシーも細かく定義することになるのではないでしょうか。
 
-### logs.tf
-
-`logs.tf`
+### logs.tf（ログストリームの作成）
 
 ```hcl
 resource "alicloud_log_project" "fc_logs" {
@@ -384,9 +376,10 @@ resource "alicloud_log_store_index" "fc_logs_index" {
 }
 ```
 
-FC のデバッグ、ログ出力のためログストリームを構築する。
-AWS の CloudWatch Logs とは異なり、Alibaba Cloud では Log Project と Log Store の 2 階層を指定してログが出力される。
-ただし、これらだけの指定だと Web UI 上でログが表示されないため、Log Store Index も指定してログの有効化もする必要がある。
+FC のデバッグ、ログ出力のためログストリームを構築しています。
+
+AWS CloudWatch Logs とは異なり、Alibaba Cloud では Log Project と Log Store の 2 階層を指定してログが出力されています。
+ただ、これらだけの指定だと Web UI 上でログが表示されないため、Log Store Index も指定してログを有効化もする必要があります。
 
 ## Messaging API と Qwen を FC で連携する
 
