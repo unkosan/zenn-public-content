@@ -383,13 +383,14 @@ AWS CloudWatch Logs とは異なり、Alibaba Cloud では Log Project と Log S
 
 ## Messaging API と Qwen を FC で連携する
 
-Function Compute の内容は service 配下に記述しています。ディレクトリ構成は以下です。
+最後に Function Compute の内容を service 配下に記述します。ディレクトリ構成は以下です。
+Qwen LLM のインターフェース、LINE API 関連のユーティリティ関数、Bot の処理ルーチンをそれぞれ `llm`, `line`, `bot` にまとめました。エントリポイントは `index.js` であり、ここから各関数を呼び出していきます。
 
 - service / bot
   - src
-    - line
-      - openaiClient.js
     - llm
+      - openaiClient.js
+    - line
       - client.js
       - isMentionToBot.js
       - verifySignature.js
@@ -398,9 +399,7 @@ Function Compute の内容は service 配下に記述しています。ディレ
   - index.js
   - package.json
 
-一つずつ解説してきます
-
-### line Directory
+### line directory
 
 `client.js`
 
@@ -425,7 +424,7 @@ async function replyMessage(replyToken, text) {
 }
 ```
 
-LINE での message の投稿は reply エンドポイントに JSON を POST すれば良い。
+LINE でメッセージを投稿する際は reply エンドポイントに JSON を POST すれば良いです。
 
 `isMentionToBot.js`
 
@@ -444,8 +443,7 @@ async function isMentionToBot(ev) {
 }
 ```
 
-isSelf 属性という便利な属性があるので、bot 自身がメンションされたことを確認可能。
-グループチャットで使用する際に利用する。
+isSelf 属性という便利な属性があるので、bot 自身がメンションされたことを確認可能です。グループチャットで使用する際に重宝します。
 
 `verifySignature.js`
 
@@ -466,9 +464,9 @@ function verifyLineSignature(bodyStr, headers) {
 }
 ```
 
-API は外部に露出しているので、シークレットで署名検証を行い不審な POST の処理を回避する。
+API は外部に露出しているため、シークレット情報で署名検証を行い不審な POST の処理を回避します。これで外部からの干渉を阻止できます。
 
-### llm
+### llm directory
 
 `openaiClient.js`
 
@@ -500,10 +498,12 @@ async function chatQwenTurbo(userText) {
 }
 ```
 
-Qwen の API は OpenAI のライブラリから呼び出すことができる。
-Streaming を false にした時、思考モードが使えないので `enable_thinking: false` にすることを忘れない。
+Qwen の API は OpenAI のライブラリから呼び出すことができます。
+Streaming を false にした時、思考モードが使えないので `enable_thinking: false` にすることを忘れないようにしたいです。
 
-### bot
+### bot directory and index.js
+
+あとは今までのロジックをまとめるだけです。読めばわかるのでこちらに関しては説明しません。
 
 `process.js`
 
@@ -531,10 +531,6 @@ async function process(ev) {
   await replyMessage(replyToken, reply);
 }
 ```
-
-あとは今までのロジックをまとめるだけ。
-
-### エントリポイント
 
 `index.js`
 
@@ -586,6 +582,8 @@ export async function handler(event, context, callback) {
 };
 
 ```
+
+以上で FC のロジックは完了です！
 
 ## おわりに
 
