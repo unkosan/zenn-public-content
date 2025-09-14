@@ -51,6 +51,19 @@ Alibaba 限らず Cloud サービスを個人運用する際にはまず budget 
 AWS などと違い、Alibaba Cloud ではアカウントを作成したら即時で各種サービスが使えるというわけではありません。一部サービスは即時で使うことができますが、いくつかのサービスは購入手続きが必要です。
 今回利用するサービスで有効化が必要なのは Simple Log Service (SLS) と Object Simple Storage (OSS) です。これらを有効化しない限り terraform 等で CLI から作成することはできません。
 
+Management Console から OSS を開くと、アクティブ化の注意書きが現れます。「今すぐ有効にする」をクリックして画面の指示に従い、サブスクリプションの手続きを行なってください。
+
+![](/images/create-line-chatbot-with-alicloud-and-qwen/oss-info-activation.png)
+
+SLS に関してもコンソールから開くとアクティブ化の要求画面が現れます。「Log Service のアクティブ化」をクリックして購入手続きを行なってください。
+途中で以下のような謎のモーダルが出現するので、URL をブラウザのアドレスバーにコピペしてアクセス。
+
+![](/images/create-line-chatbot-with-alicloud-and-qwen/sls-purchase-billing-url.png)
+
+すると次のような検証手続きの画面に映るので、画面の指示に従っていくと購入手続きが完了。
+
+![](/images/create-line-chatbot-with-alicloud-and-qwen/sls-purchase-billing-check.png)
+
 ## Terragrunt (Terraform) 用の backend を用意する
 
 Terragrunt で Alibaba Cloud のリソースを操作する際に必要なユーザと tfstate 保存用の bucket の整備を行います。
