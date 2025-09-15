@@ -72,7 +72,7 @@ Model Studio にアクセスすると、Qwen や他のモデルを管理する�
 
 Model Studio は無償試用制度があり、一定の条件下で各種モデルを無料で呼び出すことが可能です。ログイン後右上にある `New User Offer ... Activate Now` をクリックして利用を開始します。詳しくは[公式ドキュメント](https://modelstudio.console.alibabacloud.com/?tab=doc#/doc/?type=model&url=2766612)を参照してください。
 
-次に右上の `Get API Key` から Secret Key を取得します。クリックすると Key の一覧ページに遷移するので `Create API Key` から Default workspace に鍵を一つ追加してみました。以下のようにエントリが追加されたので、API Key をコピーして控えます。
+次に右上の `Get API Key` から Secret Key を取得します。クリックすると Key の一覧ページに遷移するので `Create API Key` から Default workspace に鍵を一つ追加してみました。以下のようにエントリが追加されたので、API Key をコピーして控えます。後ほど `ALIBABA_DASHSCOPE_API_KEY` 環境変数として参照します。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/qwen-dashboard-apikey.png)
 
@@ -184,7 +184,7 @@ DRY にするために generate ブロックを使って provider を定義し�
 ローカル PC から安全に利用するためには VPN や専用線を通して VPC エンドポイントを経由して Tablestore にアクセスするべきですが、基本的に単独作業で開発するためロック機構の重要性が薄く、VPN 運用のコストを払ってまでロック機構を導入するモチベがありませんでした。
 実務で運用する際は ECS Instance を立てて、VPC エンドポイントからロック用 DB にアクセスすることになるでしょうね。
 
-今回コンソールを通じて backend OSS を作成しましたが、実は `terraform-alicloud-modules/remote-backend/alicloud` モジュールを利用することでロック用 OTS とまとめて backend を一発で構築することができます。[公式ドキュメント](https://www.alibabacloud.com/help/en/terraform/five-minute-introduction-to-alibaba-cloud-terraform-oss-backend)に詳細が記載されていますが、以下の記事も参考になりますね。
+今回コンソールを通じて backend OSS を作成しましたが、実は `terraform-alicloud-modules/remote-backend/alicloud` モジュールを利用することでロック用 Tablestore とまとめて backend を一発で構築することができます。[公式ドキュメント](https://www.alibabacloud.com/help/en/terraform/five-minute-introduction-to-alibaba-cloud-terraform-oss-backend)に詳細が記載されていますが、以下の記事も参考になりますね。
 
 https://zenn.dev/kaikakin/articles/8e0b1ea308b00a
 
@@ -279,7 +279,7 @@ AWS Lambda 同様、ソースコードと依存ライブラリは zip ファイ�
 
 FC には HTTP Trigger 機能があり、API Gateway を経由せずに直接 Web API として公開できます。alicloud_fcv3_trigger を定義することでこの仕組みを利用し、生成された URL を output として参照できるようにしました。
 
-また、Web API 以外にも EventBridge や タイマー（Scheduled Trigger） を使ったイベント駆動の実行が可能らしいです。
+また、Web API 以外にも EventBridge や タイマー（Time Trigger）を使ったイベント駆動の実行が可能らしいです。
 
 ### artifacts.tf（FC を構成する zip ファイルの生成と更新）
 
