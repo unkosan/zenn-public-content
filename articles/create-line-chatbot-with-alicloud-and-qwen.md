@@ -576,7 +576,7 @@ export async function handler(event, context, callback) {
 
 ## おわりに
 
-拝読ありがとうございます。
+閲覧ありがとうございます。
 VPC 内の ECS インスタンスでの Terragrunt 実行が強く要求されている感があり、中々ローカル PC でシステム構築するのは難しい印象でしたね。
 
 今回は一部コンソールを利用してリソース操作を行なっておりましたが、CLI から同様の操作を行える [Aliyun CLI](https://github.com/aliyun/aliyun-cli) も公開されています。Aliyun CLI の導入に関してはこちらの記事が詳しいので興味ある方はぜひ参考にしてください。
