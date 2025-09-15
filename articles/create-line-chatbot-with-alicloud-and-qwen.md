@@ -568,6 +568,12 @@ export async function handler(event, context, callback) {
 
 以上で FC のロジックは完了です！
 
+## 動作確認
+
+![](/images/create-line-chatbot-with-alicloud-and-qwen/operation-check.png)
+
+うまくいってそうです。
+
 ## おわりに
 
 拝読ありがとうございます。
