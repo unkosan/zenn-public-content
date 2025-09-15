@@ -6,20 +6,16 @@ topics: ["alibaba", "alibabacloud", "terraform", "terragrunt", "qwen"]
 published: false
 ---
 
-## この記事で得られること
-
-- LINE ChatBot を作成する技術
-
 ## はじめに
 
 こんにちは、今回は AWS, Azure, GCP の次に名前が上がるにも関わらず、業務上では殆どお目にかかれないクラウド、Alibaba Cloud で遊びたくなったので LINE 上で Qwen を使ったチャットボットを作成してみました。
 
-コンプライアンス等の要請から会社の業務用ツールとは完全に別個にしたいのと、友人間の流れみたいなところもあったのでプライベートでアカウントを取得して、LINE でボットを作ってみることにしました。
+コンプライアンス等の要請から会社の業務用ツールとは完全に別個にしたいのと、友人間の流れみたいなところもあったのでプライベートでアカウントを取得して LINE でボットを作ってみることにしました。
 
 地政学的な問題から避けられがちな Alibaba Cloud ですが、実は世界 20+ リージョン・60 以上のアベイラビリティゾーンを展開しており、中国・ASEAN とのビジネスを行う上では選択肢の第一候補として挙がってくるものだと認識しています。
-喫緊に必要なわけではありませんが、将来性を見据えて学習を兼ねて触ってみました。
+喫緊で必要というわけではないですが、触れておいて損はなさそうですね。
 
-筆者は普段 AWS を利用しているため、所々で AWS との比較が出てきますがご容赦ください。
+筆者は普段 AWS を利用しているため、所々で AWS との比較が出てきますがご容赦くださいませー。
 
 ## LINE Messaging API を用意する
 
@@ -51,34 +47,29 @@ SDKError:
    Message: Your SLS service has not been opened.
 ```
 
-今回利用するサービスで有効化が必要なのは Simple Log Service (SLS) と Object Simple Storage (OSS) です。
+今回利用するサービスで有効化が必要なのは Simple Log Service (SLS) と Object Storage Service (OSS) です。
 
-Management Console から OSS を開くと、有効化要求画面が現れます。「今すぐ有効にする」をクリックして画面の指示に従い、有効化手続きを行います。
+コンソール (Management Console) から OSS を開くと、有効化要求画面が現れます。「今すぐ有効にする」をクリックして画面の指示に従い、有効化手続きを行います。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/oss-info-activation.png)
 
-SLS に関してもコンソールから開くと有効化の要求画面が現れます。「Log Service のアクティブ化」をクリックして有効化手続きを行なってください。
-途中で以下のような謎のモーダルが出現することがあります。
+SLS に関しても同様ですが、途中で以下のような謎のモーダルが出現することがあります。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/sls-purchase-billing-url.png)
 
-URL をブラウザのアドレスバーにコピペしてアクセスすると、次のような検証画面に移るので、画面の指示に従っていくと有効化手続きが完了します。
+URL をブラウザのアドレスバーにコピペしてアクセスすると、クレジットカードの検証画面に移るので、引き続き画面の指示に従っていくと有効化手続きが完了します。
 
-![](/images/create-line-chatbot-with-alicloud-and-qwen/sls-purchase-billing-check.png)
-
-最後に、クラウドを個人で運用する際には **Budget 設定** を行うのが推奨です。閾値を超えた場合に通知を受け取れるので、予期しない課金を防げます。
-請求されてからでは遅いので早めにやっておきましょう。
+一応ですが、クラウドを個人で運用する際は **Budget 設定** 行うの忘れずに。マイニング専用アカウントになってからでは遅いので。。。
 
 ## Qwen の有効化
 
-Qwen（通義千問）は Alibaba Group が開発した大規模言語モデルで、Alibaba Cloud の [**Model Studio**](https://modelstudio.console.alibabacloud.com/) から利用できます。
+Qwen は Alibaba Group が開発した大規模言語モデルで、Alibaba Cloud の [**Model Studio**](https://modelstudio.console.alibabacloud.com/) から利用できます。
 
-[Alibaba Cloud Model Studio](https://modelstudio.console.alibabacloud.com/) にアクセスします。ここから Qwen や画像生成モデル Wan などのモデルを管理するダッシュボードを利用することができます。
-Model Studio は中国版と国際版に分かれているため、アクセス後右上に International Edition と記載されていることを確認してください。
+Model Studio にアクセスすると、Qwen や他のモデルを管理するダッシュボードが表示されます。右上に Mainland China Edition / International Edition と書かれたドロップダウンがありますが、エンドポイントの所在地が中国大陸内外で分かれているようです。ひとまず今回は International Edition を利用します。
 
-Model Studio は無償試用制度があり、一定の条件下で各種モデルを無料で呼び出すことが可能です。ログイン後右上にある `New User Offer ... Activate Now` をクリックして利用を開始します。詳しくは[ドキュメント](https://modelstudio.console.alibabacloud.com/?tab=doc#/doc/?type=model&url=2766612)を参照してください。
+Model Studio は無償試用制度があり、一定の条件下で各種モデルを無料で呼び出すことが可能です。ログイン後右上にある `New User Offer ... Activate Now` をクリックして利用を開始します。詳しくは[公式ドキュメント](https://modelstudio.console.alibabacloud.com/?tab=doc#/doc/?type=model&url=2766612)を参照してください。
 
-次に右上の `Get API Key` から Secret Key を取得します。クリックすると Key の一覧ページに遷移するので `Create API Key` から Default workspace に鍵を一つ追加しました。以下のようにエントリが追加されたので、API Key をコピーして控えます。
+次に右上の `Get API Key` から Secret Key を取得します。クリックすると Key の一覧ページに遷移するので `Create API Key` から Default workspace に鍵を一つ追加してみました。以下のようにエントリが追加されたので、API Key をコピーして控えます。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/qwen-dashboard-apikey.png)
 
@@ -86,16 +77,15 @@ Model Studio は無償試用制度があり、一定の条件下で各種モデ�
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/qwen-dashboard-workspaces.png)
 
-クリックすると利用可能なモデルの一覧が現れるので、その中から使いたいモデルの名前を選んでおきます。
+クリックすると利用可能なモデルの一覧が現れるので、その中から使いたいモデルの名前を確認しておきます。
 
 ## Terragrunt 用の backend を用意する
 
-Terragrunt で Alibaba Cloud のリソースを操作するためのユーザと tfstate 用の OSS bucket の整備を行います。
-今回は Alibaba Cloud の調査も兼ねているので Web UI でリソースを作成します。
+Terragrunt で Alibaba Cloud のリソースを操作するためのユーザと tfstate 用の OSS bucket の整備をコンソール上で行います。
 
 ユーザの作成と権限付与は RAM (Resource Access Management) で行います。RAM はユーザ等のエンティティと権限を管理する機能であり、AWS IAM に相当します。
 
-まず、Management Console から RAM を開いてユーザを作成します。ユーザの作成ボタンを押すと以下のような画面が表示されます。
+まず、コンソールから RAM を開いてユーザを作成します。ユーザの作成ボタンを押すと以下のような画面が表示されます。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/ram-user-create.png)
 
@@ -105,7 +95,7 @@ Using permanent AccessKey to access を ON にして他のオプションをデ�
 
 CSV File をダウンロードして控えておきましょう。ここに書いてある AccessKey ID と AccessKey Secret を認証情報として terraform を実行します。
 
-ユーザを作成したら、次は権限付与を行います。権限管理タブを開き、Grant Permission ボタンをクリックしてください。
+ユーザを作成したら、次は権限付与を行います。権限管理タブを開き、Grant Permission ボタンをクリック。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/ram-user-grant.png)
 
@@ -113,12 +103,10 @@ CSV File をダウンロードして控えておきましょう。ここに書�
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/ram-user-grant-detail.png)
 
-AdministratorAccess のトグルを ON にしようとすると警告が出ますが、RAM を terragrunt で管理することに決めているのでこのままでいきます。RAM を管理しないのであれば警告通り PowerUserAccess に変更すべきですね。
-
-![](/images/create-line-chatbot-with-alicloud-and-qwen/ram-user-grant-warning.png)
+AdministratorAccess のトグルを ON にしようとすると警告が出ますが、今回は検証目的なので見逃します。実務上で紐づけるなら VPC 内の ECS インスタンスに開発環境作成して RAM ロールをアタッチするのがベストですかね。Admin 権限でアクセスキーを外に出すのは本番環境では正直避けたいところです。
 
 次に tfstate 保存先の OSS bucket を作成します。
-Management Console から OSS を開き、バケット一覧画面を表示しましょう。
+コンソールから OSS を開き、バケット一覧画面を表示しましょう。
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/oss-create-bucket.png)
 
@@ -126,16 +114,18 @@ Management Console から OSS を開き、バケット一覧画面を表示し�
 
 ![](/images/create-line-chatbot-with-alicloud-and-qwen/oss-create-bucket-detail-3.png)
 
-Web UI での準備が完了したので次は Terragrunt の設定です。以下のような構成でファイルツリーを構成します。
+コンソールでの準備が完了したので次は Terragrunt の設定です。以下のような構成でファイルツリーを構成します。
 
-- infra
-  - live / dev / bot
-    - terragrunt.hcl
-  - modules / bot
-    - .gitkeep
-  - root.hcl
-- services
-  - ...
+```
+infra/
+├── live/dev/bot/
+│   └── terragrunt.hcl
+├── modules/bot/
+│   └── .gitkeep
+└── root.hcl
+services/
+└── ...
+```
 
 `root.hcl` の中に provider および backend 設定を記述します。ここで先ほど設定した OSS bucket と RAM ユーザを利用します。
 
@@ -185,14 +175,13 @@ generate "provider" {
 ```
 
 先ほど控えた Alibaba Cloud のアクセスキーとシークレットキーを `ALIBABA_CLOUD_ACCESS_KEY_ID` および `ALIBABA_CLOUD_ACCESS_KEY_SECRET` 環境変数として Terragrunt に渡します。
-DRY にするために generate ブロックを使って provider を定義します。東京リージョンをデフォルトにするために `ap-northeast-1` を指定します。
+DRY にするために generate ブロックを使って provider を定義します。東京リージョンをデフォルトにしたいので `ap-northeast-1` を指定します。
 
-また、ロック用にキーバリューストア OTS (Object Table Store) を利用することもできますが、今回は利用しないことにしました。
-OTS は基本的に http エンドポイントを経由してトランザクションを受け付けますが、ローカルの PC からだと Internet, Internal, VPC endpoint の三種類の内、利用できるのは Internet endpoint のみになります。
-Internet endpoint を安全に利用するためには WAF を導入して IP で弾く機構を実装しないといけませんが、基本的に一人で作業するのでロックの必要性が小さく、プロキシ立ててロック機構を導入するモチベがありませんでした。
-VPC 内で作業したり CI/CD を構築する際はロック用 DB を導入することになるでしょうね。
+また、ロック用にキーバリューストア Tablestore (OTS) を利用することもできますが、今回は見送りました。Tablestore には Public / VPC / Classic (Internal) の http エンドポイントがあり、ローカル PC からの接続なら通常 Public を利用します。しかし Network ACL を Public 経路に挟み込むことができないので、全世界からアクセス可能でセキュリティ的にリスクを抱えることになります。
+ローカル PC から安全に利用するためには VPN や専用線を通して VPC エンドポイントを経由して Tablestore にアクセスするべきですが、基本的に単独作業で開発するためロック機構の重要性が薄く、VPN 運用のコストを払ってまでロック機構を導入するモチベがありませんでした。
+実務で運用する際は ECS Instance を立てて、VPC エンドポイントからロック用 DB にアクセスすることになるでしょうね。
 
-今回 GUI を通じて backend OSS を作成しましたが、実は `terraform-alicloud-modules/remote-backend/alicloud` モジュールを利用することでロック用 OTS とまとめて backend を一発で構築することができます。[公式ドキュメント](https://www.alibabacloud.com/help/en/terraform/five-minute-introduction-to-alibaba-cloud-terraform-oss-backend)に詳細が記載されていますが、以下の記事も参考になります。
+今回コンソールを通じて backend OSS を作成しましたが、実は `terraform-alicloud-modules/remote-backend/alicloud` モジュールを利用することでロック用 OTS とまとめて backend を一発で構築することができます。[公式ドキュメント](https://www.alibabacloud.com/help/en/terraform/five-minute-introduction-to-alibaba-cloud-terraform-oss-backend)に詳細が記載されていますが、以下の記事も参考になりますね。
 
 https://zenn.dev/kaikakin/articles/8e0b1ea308b00a
 
@@ -222,12 +211,14 @@ inputs = {
 
 modules の構成は以下の通りです。一つずつ解説していきます。
 
-- infra / modules / bot
-  - fc.tf
-  - artifacts.tf
-  - ram.tf
-  - logs.tf
-  - variables.tf
+```
+infra/modules/bot/
+├── fc.tf
+├── artifacts.tf
+├── ram.tf
+├── logs.tf
+└── variables.tf
+```
 
 ### fc.tf（Function Compute 本体）
 
@@ -283,9 +274,9 @@ FC には複数の世代がありますが、今回は最新世代の V3 を利�
 AWS Lambda 同様、ソースコードと依存ライブラリは zip ファイルにまとめてアップロードします。
 ファイルサイズの都合上、`code.zip_file` でローカルからアップロードするのではなく、OSS 上の zip を参照する方針にしています。
 
-FC には、AWS Lambda Function URLs のように API Gateway を省略して直接 Lambda を Web API からトリガさせる機構があります。`alicloud_fcv3_trigger` を定義することで実装しました。生成された URL は output されるように設定しました。
+FC には HTTP Trigger 機能があり、API Gateway を経由せずに直接 Web API として公開できます。alicloud_fcv3_trigger を定義することでこの仕組みを利用し、生成された URL を output として参照できるようにしました。
 
-Web API 以外にも FC は EventBridge (in Alicloud) や時間指定によるトリガが可能らしいです。
+また、Web API 以外にも EventBridge や タイマー（Scheduled Trigger） を使ったイベント駆動の実行が可能らしいです。
 
 ### artifacts.tf（FC を構成する zip ファイルの生成と更新）
 
@@ -310,6 +301,8 @@ data "archive_file" "zip" {
 `artifacts.tf` では、FC で利用するコードと依存ライブラリをまとめた zip ファイルの処理を行なっています。
 
 小規模なファイルはローカルからアップロードすることが可能ですが、今回のように一定のサイズを超える zip ファイルに関しては OSS を経由して FC で参照する形式を取ることが要求されます。
+
+現在時点で Alicloud provider には AWS provider における `source_code_hash` に相当する機能がなく、OSS にアップロードした zip ファイルの更新を FC 側で反映しないので、オブジェクト名を変更することで擬似的に変更を検知させるようにしています。
 
 また、圧縮操作に関しては `hashicorp/archive` の zip ユーティリティを利用しています。プラットフォーム間の一貫性のためにプロバイダを利用していますが、プロジェクトの制約等で追加できない場合は `null_resource` 等でカスタムコマンドを実装したり手で実施することになると思います。
 
@@ -338,7 +331,7 @@ resource "alicloud_ram_role_policy_attachment" "fc_log_role_attach" {
 
 `ram.tf` では FC の権限設定を実装しています。
 AWS と同様、ポリシーを作成してロールにアタッチし、Assume Role で権限を付与しています。
-今回は SLS を利用するマネージドポリシーを利用して手抜きしましたが、実務上ではポリシーも細かく定義することになるのではないでしょうか。
+今回は SLS 関係のマネージドポリシーを利用して手抜きしましたが、実務上ではポリシーも細かく定義することになるのではないでしょうかね。
 
 ### logs.tf（ログストリームの作成）
 
@@ -367,25 +360,27 @@ resource "alicloud_log_store_index" "fc_logs_index" {
 FC のデバッグ、ログ出力のためログストリームを構築しています。
 
 AWS CloudWatch Logs とは異なり、Alibaba Cloud では Log Project と Log Store の 2 階層を指定してログが出力されています。
-ただ、これらだけの指定だと Web UI 上でログが表示されないため、Log Store Index も指定してログを有効化もする必要があります。
+ただ、これらだけの指定だとコンソール上でログが表示されないため、Log Store Index も指定してログを有効化する必要があります。
 
 ## Messaging API と Qwen を FC で連携する
 
 最後に Function Compute の内容を service 配下に記述します。ディレクトリ構成は以下です。
 Qwen LLM のインターフェース、LINE API 関連のユーティリティ関数、Bot の処理ルーチンをそれぞれ `llm`, `line`, `bot` にまとめました。エントリポイントは `index.js` であり、ここから各関数を呼び出していきます。
 
-- service / bot
-  - src
-    - llm
-      - openaiClient.js
-    - line
-      - client.js
-      - isMentionToBot.js
-      - verifySignature.js
-    - bot
-      - process.js
-  - index.js
-  - package.json
+```
+service/bot/
+├── src/
+│   ├── llm/
+│   │   └── openaiClient.js
+│   ├── line/
+│   │   ├── client.js
+│   │   ├── isMentionToBot.js
+│   │   └── verifySignature.js
+│   └── bot/
+│       └── process.js
+├── index.js
+└── package.json
+```
 
 ### line directory
 
@@ -412,7 +407,7 @@ async function replyMessage(replyToken, text) {
 }
 ```
 
-LINE でメッセージを投稿する際は reply エンドポイントに JSON を POST すれば良いです。
+LINE でメッセージを投稿する際は reply エンドポイントに JSON を POST すれば良いですね。
 
 `isMentionToBot.js`
 
@@ -431,7 +426,7 @@ async function isMentionToBot(ev) {
 }
 ```
 
-isSelf 属性という便利な属性があるので、bot 自身がメンションされたことを確認可能です。グループチャットで使用する際に重宝します。
+`isSelf` 属性という便利な属性があるので、bot 自身がメンションされたことを確認可能です。グループチャットで使用する際に重宝します。
 
 `verifySignature.js`
 
@@ -486,8 +481,8 @@ async function chatQwenTurbo(userText) {
 }
 ```
 
-Qwen の API は OpenAI のライブラリから呼び出すことができます。
-Streaming を false にした時、思考モードが使えないので `enable_thinking: false` にすることを忘れないようにしたいです。
+Qwen は openai ライブラリ互換のインターフェースで呼び出すことができます。
+Streaming を false にした時、思考モードが使えなかったので `enable_thinking: false` にすることに注意。Thinking を利用したい場合はコードが複雑化しそうです。
 
 ### bot directory and index.js
 
@@ -575,6 +570,9 @@ export async function handler(event, context, callback) {
 
 ## おわりに
 
-今回は一部 management console を利用してリソース操作を行なっておりましたが、CLI から同様の操作を行える [Aliyun CLI](https://github.com/aliyun/aliyun-cli) も公開されています。Aliyun CLI の導入に関してはこちらの記事が詳しいので興味ある方はぜひ参考にしてください。
+拝読ありがとうございます。
+VPC 内の ECS インスタンスでの Terragrunt 実行が強く要求されている感があり、中々ローカル PC でシステム構築するのは難しい印象でしたね。
+
+今回は一部コンソールを利用してリソース操作を行なっておりましたが、CLI から同様の操作を行える [Aliyun CLI](https://github.com/aliyun/aliyun-cli) も公開されています。Aliyun CLI の導入に関してはこちらの記事が詳しいので興味ある方はぜひ参考にしてください。
 
 https://qiita.com/n_watanabe/items/1ca89c3a3cf5dc650305
