@@ -1,6 +1,6 @@
 ---
 title: "Alibaba cloud と Qwen LLM で LINE Chatbot を作成する"
-emoji: "😽"
+emoji: "🌀"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: ["alibaba", "alibabacloud", "terraform", "terragrunt", "qwen"]
 published: false
