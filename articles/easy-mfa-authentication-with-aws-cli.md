@@ -1,5 +1,5 @@
 ---
-title: "AWS CLI の Access-key based MFA 認証を mfa-login 一発で終わらせる"
+title: "AWS CLI のブラウザレス MFA 認証を mfa-login 一発で終わらせる"
 emoji: "👏"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: ["aws", "awscli", "iam"]
