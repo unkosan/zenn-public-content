@@ -1,9 +1,9 @@
 ---
-title: "Access-key based でも AWS CLI の MFA 認証を簡便化する"
-emoji: "📚"
+title: "AWS CLI の Access-key based MFA 認証を mfa-login 一発で終わらせる"
+emoji: "👏"
 type: "tech" # tech: 技術記事 / idea: アイデア
-topics: ["aws", "iam"]
-published: false
+topics: ["aws", "awscli", "iam"]
+published: true
 ---
 
 ## 背景
@@ -30,6 +30,8 @@ AWS Access Key ID [None]: <access_key>
 AWS Secret Access Key [None]: <secret_access_key>
 Default region name [None]: ap-northeast-1
 Default output format [None]: json
+
+# ここから以下、認証時毎回行う
 
 # アカウント ID 等を含む ARN を指定して、MFA トークンとともに指定
 $ aws sts get-session-token --profile auth --serial-number arn:aws:iam::<account_id>:mfa/<user_name> --token-code <mfa_token>
